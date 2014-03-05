@@ -1,0 +1,35 @@
+<!DOCTYPE html">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+<meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+<style type="text/css">
+html {
+	height: 100%
+}
+
+body {
+	height: 100%;
+	margin: 0;
+	padding: 0
+}
+
+</style>
+<script type="text/javascript" src="POSTtest.js">
+    </script>
+
+<title>pOST TEST</title>
+</head>
+<body>
+POST test.
+<input id=TestButton type="button" value="Test">
+<div id="output"> </div>
+
+<form action="http://localhost:9080/process_csv" method="post">
+  <div><textarea name="content" rows="3" cols="60"></textarea></div>
+  <div><input type="submit" value="Enter data"></div>
+</form>
+
+
+</body>
+</html>

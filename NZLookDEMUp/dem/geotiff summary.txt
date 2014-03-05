@@ -1,0 +1,3 @@
+path	image_width	image_height	image_x0	image_y0	image_xn	image_yn	data_offset	image_E0	image_N0
+cropped_dem/04-dargaville-15m/0001-0001_uncompressed.tif	400	2607	47600.0	19950.0	47999.0	22556.0	640	1726000.0	5934750.0
+cropped_dem/05-auckland-15m/0001-0001_uncompressed.tif	2845	2651	48000.0	19956.0	50844.0	22606.0	640	1732000.0	5934660.0

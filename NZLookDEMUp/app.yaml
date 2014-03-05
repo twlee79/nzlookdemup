@@ -1,0 +1,16 @@
+application: nzlookdemup
+version: 1
+runtime: python27
+api_version: 1
+threadsafe: true
+
+handlers:
+- url: /forms
+  static_dir: forms
+
+- url: /.*
+  script: nzlookdemup.application
+
+libraries:
+- name: webapp2
+  version: latest
