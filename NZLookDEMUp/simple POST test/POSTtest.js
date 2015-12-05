@@ -16,11 +16,12 @@ function test3() {
         if (respBuffer) {
           var view = new DataView(respBuffer);
           //console.log(respBuffer.byteLength);
-          for (var i = 0; i < respBuffer.byteLength; i+=12) {
+          for (var i = 0; i < respBuffer.byteLength; i+=16) {
             var lat = view.getInt32(i)*1.0e-7;
             var lng = view.getInt32(i+4)*1.0e-7;
             var q = view.getInt32(i+8)*1.0e-3;
-            outputDiv.innerHTML+=lat.toFixed(6)+","+lng.toFixed(6)+","+q.toFixed(1)+"<BR>";
+            var index = view.getInt32(i+12);
+            outputDiv.innerHTML+=lat.toFixed(6)+","+lng.toFixed(6)+","+q.toFixed(1)+","+index+"<BR>";
             //var q = view.getInt32(i)*1.0e-3;
             //outputDiv.innerHTML+=q.toFixed(6);
           } 

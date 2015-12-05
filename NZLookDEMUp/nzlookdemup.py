@@ -6,6 +6,7 @@ import webapp2
 from nztm2000 import NZTM2000
 import deminterpolater
 import struct
+import traceback
 
 class BaseHandler(webapp2.RequestHandler):
     """
@@ -117,6 +118,8 @@ class ProcessBinary(BaseHandler):
 
         # Set a custom message.
         self.response.write('An error occurred : {}'.format(exception.message))
+        self.response.write(traceback.format_exc())
+
 
         if isinstance(exception, webapp2.HTTPException):
             # If the exception is a HTTPException, use its error code.
@@ -134,52 +137,37 @@ class ProcessBinary(BaseHandler):
     def post(self):
         self.response.headers['Access-Control-Allow-Origin'] = 'null'
         expected_ints = self.request.content_length/4
-        if expected_ints%2 != 0: raise Exception("Expected pairs of input values.")
+        if expected_ints!=2 and expected_ints%4 != 0:
+             raise Exception("Expected two input values or in multiples of 4, got %i."%expected_ints)
         num_pairs = expected_ints/2
 
         input_values = struct.unpack('!%ii'%expected_ints, self.request.body)
 
-        all_tracks = []
-        point1 = point2 = None
-        last_item = None
+        full_track = [] # whole track for all points
 
-        for i in xrange(0,expected_ints,2):
-          latlng = (input_values[i]*1.0e-7,input_values[i+1]*1.0e-7)
-          point2 = NZTM2000.latlng_to_NZTM(*latlng)
-          if point1 is not None:
-            #print "Got segment: {}-{}".format(point1, point2)
-            dE = point2[0]-point1[0]
-            dN = point2[1]-point1[1]
-            dist = (dE**2 + dN**2) ** 0.5
-            track = deminterpolater.interpolate_line_ideal(point1[0], point1[1], point2[0], point2[1])
-            #print 'first', point1, demset.interpolate_DEM(*point1)
-            #print ",".join(reader.dem_path for reader in demset.active_reader_list)
-            last_item_index = len(track)-1
-            for item in itertools.islice(track,last_item_index):
-              all_tracks.append(item) # don't add immediately last item, as it repeats with first from next
-            last_item = track[last_item_index] # store for possibly adding to end
-              #output+="%.2f\t%.2f\t%.3f\t%.3f\t%r\t%r\t%r"%item
-              #output+='\t%f\n'%cumul_dist
-              #print 'track', item
-
-            #print 'second', point2, demset.interpolate_DEM(*point2)
-            #cumul_dist+=dist
-          point1 = point2
         self.response.headers['Content-Type'] = 'application/octet-stream'
         if expected_ints == 2:
           # single point requested, interpolate it and return height
+          latlng1 = (input_values[0]*1.0e-7,input_values[1]*1.0e-7)
+          point1 = NZTM2000.latlng_to_NZTM(*latlng1)
           q = deminterpolater.demset.interpolate_DEM(*point1)
           self.response.write(struct.pack("!i",q*1e3))
           return
-        all_tracks.append(last_item)
-        #self.response.headers['Content-Type'] = 'text/plain'
-        #self.response.write("lat,lng,elev\n")
-        for item in all_tracks:
+        for i in xrange(0,expected_ints,4):
+          latlng1 = (input_values[i+0]*1.0e-7,input_values[i+1]*1.0e-7)
+          latlng2 = (input_values[i+2]*1.0e-7,input_values[i+3]*1.0e-7)
+          point1 = NZTM2000.latlng_to_NZTM(*latlng1)
+          point2 = NZTM2000.latlng_to_NZTM(*latlng2)
+          dE = point2[0]-point1[0]
+          dN = point2[1]-point1[1]
+          dist = (dE**2 + dN**2) ** 0.5
+          track = deminterpolater.interpolate_line_ideal(point1[0], point1[1], point2[0], point2[1])
+          full_track += track
+
+        for item in full_track:
+          index = item[3]
           latlng = NZTM2000.NZTM_to_latlng(item[0],item[1])
-          self.response.write(struct.pack("!3i",latlng[0]*1e7,latlng[1]*1e7,item[2]*1e3))
-          #self.response.write("{:.6f},{:.6f},{:.1f}\n".format(latlng[0],latlng[1],item[2]))
-          #if len(item)>3:
-          #  self.response.write(item[3])
+          self.response.write(struct.pack("!4i",latlng[0]*1e7,latlng[1]*1e7,item[2]*1e3,item[3]))
 
 class LookupDEM(BaseHandler):
     pass

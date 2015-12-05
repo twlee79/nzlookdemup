@@ -2,7 +2,7 @@
 
 """
 DEMInterpolater module
-version 12
+version 13
 Copyright (c) 2014 Tet Woo Lee
 """
 
@@ -40,7 +40,8 @@ def line_DEM_profile_naive(x1, y1, x2, y2, steps=11):
 
   Returns a list of ``(x, y, q, index)`` tuples, where ``x, y`` are
   coordinates of interpolation points, ``q`` is DEM height
-  and ``index`` is the index of the point
+  and ``index`` is the index of the point; the first point has an index
+  of 0 and the last point has an index of -2
 
   Does not catch IndexErrors from failed DEM lookups, so these
   will be propagated to the caller.
@@ -116,6 +117,7 @@ def line_DEM_profile_naive(x1, y1, x2, y2, steps=11):
   q = demset.interpolate_DEMxy(x, y)
   E = x*voxelE + set0_E
   N = y*voxelN + set0_N
+  index = -2 # last point has index -2
   #track.append((x, y, q, dist))
   #track.append((E, N, q,"naive"))
   track.append((E, N, q, index))
@@ -208,7 +210,10 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta = 0.01, force_minmax 
   grade : grade of from last point to this point (d_q/d_dist), None in first segment
   d_dist : delta of dist from last point, None in first segment
   d_q : delta of q from last point, None in first segment
-  index : increasing index number of the point, may not be sequential, but guaranteed to start at 0
+  index : increasing index number of the point(up to last point), may not be sequential
+  but first point   will always be ``0`` and last point will be <0 (-1 if this algorithm
+  used, -2 if naive algorithm used because line was too long)
+
 
   Does not catch IndexErrors from failed DEM lookups, so these
   will be propagated to the caller.
@@ -229,7 +234,7 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta = 0.01, force_minmax 
   abs_dx = abs(dx)
   abs_dy = abs(dy)
 
-  if abs_dx>3 or abs_dy>3:
+  if abs_dx>300 or abs_dy>300:
     # line length for this algorithm exceeded
     # use naive algorithm
     return line_DEM_profile_naive(x0, y0, x1, y1, steps=11)
@@ -325,10 +330,17 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta = 0.01, force_minmax 
     #track.append((E, N, dist, q, grade, d_dist, d_q))
     #track.append((E, N, q,"ideal"))
     track.append((E, N, q, index))
+
+
+    if x==x1 and y==y1:
+      # reached end point
+      if index!=-1:
+        # ensure always add a -1 point
+        # may get here if point0 == point1
+        track.append((E, N, q, -1))
+      break
+
     index+=1
-
-
-    if x==x1 and y==y1: break # reached end point
 
     # vertex is a point on the line than may give a maximum or minimum value of
     # q in the linear interpolation algorithm
@@ -376,6 +388,7 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta = 0.01, force_minmax 
       dym = abs(y - y_int_m)
       dyp = abs(y_int_p - y)
       q = qmm*dxp*dyp + qpm*dxm*dyp + qmp*dxp*dym + qpp*dxm*dym
+      index = -1 # mark last point with index -1
     else:
       check_vertex = True # well be incrementing qmm-qpp points, check a vertex next iteration
 
