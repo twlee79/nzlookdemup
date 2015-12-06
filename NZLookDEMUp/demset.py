@@ -28,6 +28,7 @@ bucket_name = '/'+os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_buc
 
 
 class DEMReader:
+  buffer_size = 1024*1024 # need manual buffer for cloud storage, this does not support buffered random i/o (sequential only)
   def __init__(self, dem_path, image_width, image_height, image_x0, image_y0, 
     image_xn, image_yn, data_offset, cloud = False):
     self.dem_path = dem_path
@@ -40,15 +41,34 @@ class DEMReader:
     self.data_offset = data_offset
     self.dem_file = None
     self.cloud = cloud
+    self.buffer = None
+    self.buffer_start = None
+    self.buffer_end = None
   def activate(self):
     #print "Activating: ",self.dem_path
     assert self.dem_file==None # assert to check for double activation
     if not self.cloud:
         self.dem_file = file(self.dem_path,"rb")
     else:
-        self.dem_file = cloudstorage.open(bucket_name+'/'+self.dem_path,"r",read_buffer_size=1024)
+        self.dem_file = cloudstorage.open(bucket_name+'/'+self.dem_path,"r",read_buffer_size=buffer_size)
   def within_bounds(self,x,y):
     return self.image_x0 <= x <= self.image_xn and self.image_y0 < y <= self.image_yn
+  def buffered_read(self,offset,size):
+    if offset>self.buffer_start and offset+size<self.buffer_end and self.buffer is not None:
+        pass # in buffer
+    else:
+        self.buffer_start = offset - self.buffer_size/2
+        if self.buffer_start<0: self.buffer_start = 0
+        self.dem_file.seek(offset)
+        self.buffer = self.dem_file.read(self.buffer_size)
+        self.buffer_end = self.buffer_start + len(self.buffer)
+        print 'Buffer read from {} to {}'.format(self.buffer_start,self.buffer_end)
+    offset_in_buffer = offset-self.buffer_start
+    assert offset_in_buffer>0 and offset_in_buffer<self.buffer_size
+    data = self.buffer[offset_in_buffer:offset_in_buffer+size]
+    assert len(data)==size
+    return data
+        
   def get_value(self,x,y):
     """
     Get height of point ``x,y`` from this DEM.
@@ -59,11 +79,12 @@ class DEMReader:
 
 
     """
+    x = int(x)
+    y = int(y)
     offset = self.data_offset + ( (x-self.image_x0) + (y-self.image_y0) * self.image_width )*4
 
-    self.dem_file.seek(offset)
-    buffer = self.dem_file.read(4)
-    return struct.unpack('<f', buffer)[0]
+    packed = self.buffered_read(offset,4)
+    return struct.unpack('<f', packed)[0]
 
   def get_value_safe(self,x,y):
     """
@@ -74,6 +95,8 @@ class DEMReader:
 
 
     """
+    x = int(x)
+    y = int(y)
     if not self.image_x0 <= x <= self.image_xn: raise IndexError("out of DEM bounds")
     if not self.image_y0 <= y <= self.image_yn: raise IndexError("out of DEM bounds")
     offset = self.data_offset + ( (x-self.image_x0) + (y-self.image_y0) * self.image_width )*4
@@ -82,9 +105,8 @@ class DEMReader:
       assert False
       self.activate()
 
-    self.dem_file.seek(offset)
-    buffer = self.dem_file.read(4)
-    return struct.unpack('<f', buffer)[0]
+    packedr = self.buffered_read(offset,4)
+    return struct.unpack('<f', packed)[0]
 
 
 class DEMSet:
@@ -99,39 +121,39 @@ class DEMSet:
     #DEMReader("dem/05-auckland-15m-1-0001-0001_uncompressed.tif",8000,12000,48000,19200,55999,31199,639,True),
     #DEMReader("dem/05-auckland-15m-1-0001-0001_uncompressed.tif",8000,12000,48000,19200,55999,31199,639)
     #DEMReader("updem/05-auckland-15m_0001-0001_uncompressed.tif",2845,2651,48000,19956,50844,22606,640),
-#    DEMReader("subset_dem/05-auckland-15m-subset01-1x1.tif",2000,3000,48000.0,19200.0,49999.0,22199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset02-1x2.tif",2000,3000,50000.0,19200.0,51999.0,22199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset03-1x3.tif",2000,3000,52000.0,19200.0,53999.0,22199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset04-1x4.tif",2000,3000,54000.0,19200.0,55999.0,22199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset05-2x1.tif",2000,3000,48000.0,22200.0,49999.0,25199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset06-2x2.tif",2000,3000,50000.0,22200.0,51999.0,25199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset07-2x3.tif",2000,3000,52000.0,22200.0,53999.0,25199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset08-2x4.tif",2000,3000,54000.0,22200.0,55999.0,25199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset09-3x1.tif",2000,3000,48000.0,25200.0,49999.0,28199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset10-3x2.tif",2000,3000,50000.0,25200.0,51999.0,28199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset11-3x3.tif",2000,3000,52000.0,25200.0,53999.0,28199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset12-3x4.tif",2000,3000,54000.0,25200.0,55999.0,28199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset13-4x1.tif",2000,3000,48000.0,28200.0,49999.0,31199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset14-4x2.tif",2000,3000,50000.0,28200.0,51999.0,31199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset15-4x3.tif",2000,3000,52000.0,28200.0,53999.0,31199.0,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset16-4x4.tif",2000,3000,54000.0,28200.0,55999.0,31199.0,639),
-    DEMReader("subset_dem/05-auckland-15m-subset01-1x1.tif",2000,3000,48000.0,19200.0,49999.0,22199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset02-1x2.tif",2000,3000,50000.0,19200.0,51999.0,22199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset03-1x3.tif",2000,3000,52000.0,19200.0,53999.0,22199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset04-1x4.tif",2000,3000,54000.0,19200.0,55999.0,22199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset05-2x1.tif",2000,3000,48000.0,22200.0,49999.0,25199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset06-2x2.tif",2000,3000,50000.0,22200.0,51999.0,25199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset07-2x3.tif",2000,3000,52000.0,22200.0,53999.0,25199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset08-2x4.tif",2000,3000,54000.0,22200.0,55999.0,25199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset09-3x1.tif",2000,3000,48000.0,25200.0,49999.0,28199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset10-3x2.tif",2000,3000,50000.0,25200.0,51999.0,28199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset11-3x3.tif",2000,3000,52000.0,25200.0,53999.0,28199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset12-3x4.tif",2000,3000,54000.0,25200.0,55999.0,28199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset13-4x1.tif",2000,3000,48000.0,28200.0,49999.0,31199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset14-4x2.tif",2000,3000,50000.0,28200.0,51999.0,31199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset15-4x3.tif",2000,3000,52000.0,28200.0,53999.0,31199.0,639,True),
-    DEMReader("subset_dem/05-auckland-15m-subset16-4x4.tif",2000,3000,54000.0,28200.0,55999.0,31199.0,639,True),
-    #DEMReader("dem/04-dargaville-15m_0001-0001_uncompressed.tif",400,2607,47600.0,19950.0,47999.0,22556.0,640)
+    DEMReader("subset_dem/05-auckland-15m-subset01-1x1.tif",2000,3000,48000,19200,49999,22199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset02-1x2.tif",2000,3000,50000,19200,51999,22199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset03-1x3.tif",2000,3000,52000,19200,53999,22199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset04-1x4.tif",2000,3000,54000,19200,55999,22199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset05-2x1.tif",2000,3000,48000,22200,49999,25199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset06-2x2.tif",2000,3000,50000,22200,51999,25199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset07-2x3.tif",2000,3000,52000,22200,53999,25199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset08-2x4.tif",2000,3000,54000,22200,55999,25199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset09-3x1.tif",2000,3000,48000,25200,49999,28199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset10-3x2.tif",2000,3000,50000,25200,51999,28199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset11-3x3.tif",2000,3000,52000,25200,53999,28199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset12-3x4.tif",2000,3000,54000,25200,55999,28199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset13-4x1.tif",2000,3000,48000,28200,49999,31199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset14-4x2.tif",2000,3000,50000,28200,51999,31199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset15-4x3.tif",2000,3000,52000,28200,53999,31199,639),
+    DEMReader("subset_dem/05-auckland-15m-subset16-4x4.tif",2000,3000,54000,28200,55999,31199,639),
+#    DEMReader("subset_dem/05-auckland-15m-subset01-1x1.tif",2000,3000,48000,19200,49999,22199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset02-1x2.tif",2000,3000,50000,19200,51999,22199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset03-1x3.tif",2000,3000,52000,19200,53999,22199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset04-1x4.tif",2000,3000,54000,19200,55999,22199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset05-2x1.tif",2000,3000,48000,22200,49999,25199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset06-2x2.tif",2000,3000,50000,22200,51999,25199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset07-2x3.tif",2000,3000,52000,22200,53999,25199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset08-2x4.tif",2000,3000,54000,22200,55999,25199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset09-3x1.tif",2000,3000,48000,25200,49999,28199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset10-3x2.tif",2000,3000,50000,25200,51999,28199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset11-3x3.tif",2000,3000,52000,25200,53999,28199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset12-3x4.tif",2000,3000,54000,25200,55999,28199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset13-4x1.tif",2000,3000,48000,28200,49999,31199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset14-4x2.tif",2000,3000,50000,28200,51999,31199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset15-4x3.tif",2000,3000,52000,28200,53999,31199,639,True),
+#    DEMReader("subset_dem/05-auckland-15m-subset16-4x4.tif",2000,3000,54000,28200,55999,31199,639,True),
+    #DEMReader("dem/04-dargaville-15m_0001-0001_uncompressed.tif",400,2607,47600,19950,47999,22556,640)
   ]
   def __init__(self):
     self.active_reader_list = []

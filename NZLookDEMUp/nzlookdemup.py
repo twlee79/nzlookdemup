@@ -1,4 +1,3 @@
-import cgi
 import csv
 import itertools
 import logging
@@ -10,7 +9,6 @@ import traceback
 import cloudstorage
 import os
 from google.appengine.api import app_identity
-import gc
 import sys
 
 class BaseHandler(webapp2.RequestHandler):
@@ -59,10 +57,6 @@ class ProcessCSV(BaseHandler):
         self.response.headers['Access-Control-Allow-Origin'] = 'null'
         self.response.headers['Access-Control-Allow-Headers'] = 'content-type'
     def post(self):
-        #gc.set_debug(gc.DEBUG_STATS|gc.DEBUG_LEAK)
-        #gc.set_debug(gc.DEBUG_STATS|gc.DEBUG_OBJECTS)
-
-        #tr = tracker.SummaryTracker()           
     #self.response.headers['Access-Control-Allow-Origin'] = 'null'
         #self.response.write(self.request.headers)
         #self.response.write(self.request.body)
@@ -110,20 +104,7 @@ class ProcessCSV(BaseHandler):
 
             #print 'second', point2, demset.interpolate_DEM(*point2)
             #cumul_dist+=dist
-            #if i%20==0: 
-            #gc.collect()
-            #objgraph.show_most_common_types()
             print "Iter{}".format(i)
-            #if i%60==0: 
-            #    break
-
-            #if i%20==0: 
-                #all_objects = muppy.get_objects()
-                #sum1 = summary.summarize(all_objects)
-                #summary.print_(sum1) 
-                #tr.print_diff()
-                #sys.stdout.flush()
-            #tr.print_diff()
             
           point1 = point2
         all_tracks.append(last_item)
@@ -135,10 +116,7 @@ class ProcessCSV(BaseHandler):
           self.response.write("{:.6f},{:.6f},{:.1f}\n".format(latlng[0],latlng[1],item[2]))
           #if len(item)>3:
           #  self.response.write(item[3])
-        #tr.print_diff()
         print "done"
-        #gc.collect()
-        #objgraph.show_most_common_types()
         sys.stdout.flush()
 
 class ProcessBinary(BaseHandler):
