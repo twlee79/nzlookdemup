@@ -22,38 +22,23 @@ Copyright (c) 2014 Tet Woo Lee
 import struct
 import cloudstorage
 import os
+import weakref
 from google.appengine.api import app_identity
 
 bucket_name = '/'+os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
 
-
-class DEMReader:
-  buffer_size = 1024*1024 # need manual buffer for cloud storage, this does not support buffered random i/o (sequential only)
-  def __init__(self, dem_path, image_width, image_height, image_x0, image_y0, 
-    image_xn, image_yn, data_offset, cloud = False):
-    self.dem_path = dem_path
-    self.image_width = image_width
-    self.image_height = image_height
-    self.image_x0 = image_x0
-    self.image_y0 = image_y0
-    self.image_xn	= image_xn
-    self.image_yn = image_yn
-    self.data_offset = data_offset
-    self.dem_file = None
-    self.cloud = cloud
-    self.buffer = None
-    self.buffer_start = None
-    self.buffer_end = None
-  def activate(self):
-    #print "Activating: ",self.dem_path
-    assert self.dem_file==None # assert to check for double activation
-    if not self.cloud:
-        self.dem_file = file(self.dem_path,"rb")
-    else:
-        self.dem_file = cloudstorage.open(bucket_name+'/'+self.dem_path,"r",read_buffer_size=buffer_size)
-  def within_bounds(self,x,y):
-    return self.image_x0 <= x <= self.image_xn and self.image_y0 < y <= self.image_yn
-  def buffered_read(self,offset,size):
+# need manual buffer for cloud storage, this does not support buffered random i/o (sequential only)
+class DEMBufferedFile:
+  buffer_size = 1024*1024 
+  def __init__(self,dem_path,in_cloud):
+      if not in_cloud:
+        self.dem_file = file(dem_path,"rb")
+      else:
+        self.dem_file = cloudstorage.open(bucket_name+'/'+dem_path,"r",read_buffer_size=self.buffer_size)
+      self.buffer = None
+      self.buffer_start = None
+      self.buffer_end = None
+  def read(self,offset,size):
     if offset>self.buffer_start and offset+size<self.buffer_end and self.buffer is not None:
         pass # in buffer
     else:
@@ -68,6 +53,35 @@ class DEMReader:
     data = self.buffer[offset_in_buffer:offset_in_buffer+size]
     assert len(data)==size
     return data
+
+class DEMReader:
+  def __init__(self, dem_path, image_width, image_height, image_x0, image_y0, 
+    image_xn, image_yn, data_offset, in_cloud = False):
+    self.dem_path = dem_path
+    self.image_width = image_width
+    self.image_height = image_height
+    self.image_x0 = image_x0
+    self.image_y0 = image_y0
+    self.image_xn	= image_xn
+    self.image_yn = image_yn
+    self.data_offset = data_offset
+    self.in_cloud = in_cloud
+    self.weak_buffered_reader = None
+    self.buffered_reader = None
+  def activate(self):
+    print "Activating: ",self.dem_path
+    buffered_reader = DEMBufferedFile(self.dem_path,self.in_cloud)
+    self.weak_buffered_reader = weakref.ref(buffered_reader)
+ 
+  def within_bounds(self,x,y):
+    return self.image_x0 <= x <= self.image_xn and self.image_y0 < y <= self.image_yn
+  def buffered_read(self,offset,size):
+    buffered_reader = self.weak_buffered_reader()
+    if buffered_reader is None:
+      buffered_reader = DEMBufferedFile(self.dem_path,self.in_cloud)
+      self.weak_buffered_reader = weakref.ref(buffered_reader)
+      #self.buffered_reader = buffered_reader
+    return buffered_reader.read(offset,size)
         
   def get_value(self,x,y):
     """
