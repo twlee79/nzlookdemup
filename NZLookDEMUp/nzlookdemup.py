@@ -7,6 +7,11 @@ from nztm2000 import NZTM2000
 import deminterpolater
 import struct
 import traceback
+import cloudstorage
+import os
+from google.appengine.api import app_identity
+import gc
+import sys
 
 class BaseHandler(webapp2.RequestHandler):
     """
@@ -54,10 +59,14 @@ class ProcessCSV(BaseHandler):
         self.response.headers['Access-Control-Allow-Origin'] = 'null'
         self.response.headers['Access-Control-Allow-Headers'] = 'content-type'
     def post(self):
-        self.response.headers['Access-Control-Allow-Origin'] = 'null'
-        self.response.write(self.request.headers)
-        self.response.write(self.request.body)
-        return
+        #gc.set_debug(gc.DEBUG_STATS|gc.DEBUG_LEAK)
+        #gc.set_debug(gc.DEBUG_STATS|gc.DEBUG_OBJECTS)
+
+        #tr = tracker.SummaryTracker()           
+    #self.response.headers['Access-Control-Allow-Origin'] = 'null'
+        #self.response.write(self.request.headers)
+        #self.response.write(self.request.body)
+        #return
         if self.request.content_type == "text/plain":
           csv_data = self.request.body
         elif self.request.content_type == "application/x-www-form-urlencoded":
@@ -80,7 +89,7 @@ class ProcessCSV(BaseHandler):
         all_tracks = []
         last_item = None
 
-        for row in csv_reader:
+        for i,row in enumerate(csv_reader):
           latlng = (float(row[latname]), float(row[lngname]))
           point2 = NZTM2000.latlng_to_NZTM(*latlng)
           if point1 is not None:
@@ -101,8 +110,24 @@ class ProcessCSV(BaseHandler):
 
             #print 'second', point2, demset.interpolate_DEM(*point2)
             #cumul_dist+=dist
+            #if i%20==0: 
+            #gc.collect()
+            #objgraph.show_most_common_types()
+            print "Iter{}".format(i)
+            #if i%60==0: 
+            #    break
+
+            #if i%20==0: 
+                #all_objects = muppy.get_objects()
+                #sum1 = summary.summarize(all_objects)
+                #summary.print_(sum1) 
+                #tr.print_diff()
+                #sys.stdout.flush()
+            #tr.print_diff()
+            
           point1 = point2
         all_tracks.append(last_item)
+        print "Generating response"
         self.response.headers['Content-Type'] = 'text/plain'
         self.response.write("lat,lng,elev\n")
         for item in all_tracks:
@@ -110,6 +135,11 @@ class ProcessCSV(BaseHandler):
           self.response.write("{:.6f},{:.6f},{:.1f}\n".format(latlng[0],latlng[1],item[2]))
           #if len(item)>3:
           #  self.response.write(item[3])
+        #tr.print_diff()
+        print "done"
+        #gc.collect()
+        #objgraph.show_most_common_types()
+        sys.stdout.flush()
 
 class ProcessBinary(BaseHandler):
     def handle_exception(self, exception, debug):
@@ -178,10 +208,42 @@ class LookupDEM(BaseHandler):
 #voxelN = -15.0
 # x and y defined in terms of these coordinates
 
+class TestGCS(BaseHandler):
+    def get(self):
+        bucket_name = '/'+os.environ.get('BUCKET_NAME',
+                                 app_identity.get_default_gcs_bucket_name())
+        self.list_bucket(bucket_name)
+    def list_bucket(self, bucket):
+      """Create several files and paginate through them.
+
+      Production apps should set page_size to a practical value.
+
+      Args:
+        bucket: bucket.
+      """
+      self.response.write(bucket+' Listbucket result:\n')
+
+      page_size = 1
+      stats = cloudstorage.listbucket(bucket + '/', max_keys=page_size)
+      while True:
+        count = 0
+        for stat in stats:
+          count += 1
+          self.response.write(repr(stat))
+          self.response.write('\n')
+
+        if count != page_size or count == 0:
+          break
+        # pylint: disable=undefined-loop-variable
+        stats = cloudstorage.listbucket(bucket + '/', max_keys=page_size,
+                               marker=stat.filename)
+
 
 
 application = webapp2.WSGIApplication([
     ('/', UploadForm),
     ('/process_csv', ProcessCSV),
     ('/process_binary', ProcessBinary),
+    ('/test_gcs', TestGCS),
+    
 ], debug=True)
