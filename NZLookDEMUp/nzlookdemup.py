@@ -104,7 +104,6 @@ class ProcessCSV(BaseHandler):
 
             #print 'second', point2, demset.interpolate_DEM(*point2)
             #cumul_dist+=dist
-            print "Iter{}".format(i)
             
           point1 = point2
         all_tracks.append(last_item)

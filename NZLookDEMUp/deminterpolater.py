@@ -243,8 +243,8 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
     y = y0
 
     # define 1 unit change with direction
-    dx1 = + 1.0 if dx >= 0 else -1.0
-    dy1 = + 1.0 if dy >= 0 else -1.0
+    dx1 = +1 if dx >= 0 else -1
+    dy1 = +1 if dy >= 0 else -1
 
     # find numbers to add to floor to give minus and plus points surrounding current point
     xm = + 1 if dx < 0 else 0 # if x is decreasing, 'minus' point is ahead of current point (floor+1), else behind (floor+0)
@@ -253,14 +253,14 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
     yp = + 1 if dy >= 0 else 0
 
     # find surrounding whole points for first point
-    x_int_m = x // 1 + xm
-    x_int_p = x // 1 + xp
-    y_int_m = y // 1 + ym
-    y_int_p = y // 1 + yp
+    x_int_m = int(x // 1) + xm
+    x_int_p = int(x // 1) + xp
+    y_int_m = int(y // 1) + ym
+    y_int_p = int(y // 1) + yp
 
     # find terminating whole points
-    x1_int_m = x1 // 1 + xm
-    y1_int_m = y1 // 1 + ym
+    x1_int_m = int(x1 // 1) + xm
+    y1_int_m = int(y1 // 1) + ym
 
     #print x0,",", y0,"to", x1,",", y1
     #print "delta", dx, dy

@@ -2,8 +2,8 @@
 
 """
 DEMSet module
-version 8
-Copyright (c) 2014 Tet Woo Lee
+version 9
+Copyright (c) 2014-2016 Tet Woo Lee
 """
 
 # This program is free software: you can redistribute it and/or modify
@@ -21,44 +21,54 @@ Copyright (c) 2014 Tet Woo Lee
 
 import cloudstorage
 from collections import deque
+from itertools import izip
 from google.appengine.api import app_identity
 import os
 import struct
 
 bucket_name = '/' + os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
 
-
 class DEMReader:
     buffer_size = 4 * 1024 * 1024 # need manual buffer for cloud storage, this does not support buffered random i/o (sequential only)
-    def __init__(self, dem_path, image_width, image_height, image_x0, image_y0, 
-                 image_xn, image_yn, data_offset, cloud=False):
-        self.dem_path = dem_path
-        self.image_width = image_width
-        self.image_height = image_height
-        self.image_x0 = image_x0
-        self.image_y0 = image_y0
-        self.image_xn	= image_xn
-        self.image_yn = image_yn
-        self.data_offset = data_offset
-        self.dem_file = None
+    def __init__(self, field_dict, cloud=False):
+        self.dem_path = field_dict["path"]
+        self.image_width = field_dict["image_width"]
+        self.image_height = field_dict["image_height"]
+        self.image_x0 = field_dict["image_x0"]
+        self.image_y0 = field_dict["image_y0"]
+        self.image_xn = field_dict["image_xn"]
+        self.image_yn = field_dict["image_yn"]
+        self.data_offset = field_dict["data_offset"]
+
         self.cloud = cloud
+        self.dem_file = None
+        self.deactivate()
+    def is_active(self):
+        return self.dem_file is not None
+    def activate(self):
+        print "Activating: ",self.dem_path
+        assert self.dem_file is None # assert to check for double activation
+        if not self.cloud:
+            file_path = 'nztmdem_1000x1000/' + self.dem_path
+            self.dem_file_size = os.stat(file_path).st_size
+            self.dem_file = file(file_path, "rb")
+        else:
+            bucket_path = bucket_name + '/nztmdem_1000x1000/' + self.dem_path
+            self.dem_file_size = cloudstorage.stat(bucket_path).st_size
+            self.dem_file = cloudstorage.open(bucket_path, "r", read_buffer_size=self.buffer_size)
+    def deactivate(self):
+        if self.is_active(): print "Deactivating: ",self.dem_path
+        self.dem_file = None
         self.buffer = None
         self.buffer_start = None
         self.buffer_end = None
-    def activate(self):
-        #print "Activating: ",self.dem_path
-        assert self.dem_file == None # assert to check for double activation
-        if not self.cloud:
-            self.dem_file = file(self.dem_path, "rb")
-        else:
-            self.dem_file = cloudstorage.open(bucket_name + '/' + self.dem_path, "r", read_buffer_size=self.buffer_size)
     def within_bounds(self, x, y):
-        return self.image_x0 <= x <= self.image_xn and self.image_y0 < y <= self.image_yn
+        return self.image_x0 <= x <= self.image_xn and self.image_y0 <= y <= self.image_yn
     def buffered_read(self, offset, size):
         if offset > self.buffer_start and offset + size < self.buffer_end and self.buffer is not None:
             pass # in buffer
         else:
-            self.buffer_start = offset - self.buffer_size / 2
+            self.buffer_start = min(offset - self.buffer_size / 2, self.dem_file_size - self.buffer_size)
             if self.buffer_start < 0: self.buffer_start = 0
             self.dem_file.seek(self.buffer_start)
             self.buffer = self.dem_file.read(self.buffer_size)
@@ -72,14 +82,14 @@ class DEMReader:
         
     def get_value(self, x, y):
         """
-    Get height of point ``x,y`` from this DEM.
-    Fast version. Does not check bounds or check that file is opened.
-    Expected that caller (``DEMSet``) will have handled these.
+        Get height of point ``x,y`` from this DEM.
+        Fast version. Does not check bounds or check that file is opened.
+        Expected that caller (``DEMSet``) will have handled these.
 
-    x, y : number, integers
+        x, y : number, integers
 
 
-    """
+        """
         x = int(x)
         y = int(y)
         offset = self.data_offset + ((x-self.image_x0) + (y-self.image_y0) * self.image_width) * 4
@@ -89,13 +99,13 @@ class DEMReader:
 
     def get_value_safe(self, x, y):
         """
-    Get height of point ``x,y`` from this DEM.
-    Returns ``None`` if point is out-of-range.
+        Get height of point ``x,y`` from this DEM.
+        Returns ``None`` if point is out-of-range.
 
-    x, y : number, integers
+        x, y : number, integers
 
 
-    """
+        """
         x = int(x)
         y = int(y)
         if not self.image_x0 <= x <= self.image_xn: raise IndexError("out of DEM bounds")
@@ -117,91 +127,106 @@ class DEMSet:
     voxelN = -15.0
     # x and y defined in terms of these coordinates
   
-    max_active_readers = 5
-  
-    DEM_reader_list_path = "DEMs"
+    max_active_readers = 10
+    DEM_reader_grid_resolution = 200
 
-    DEM_reader_list = [
-        # presort this list based on expected use, highest used readers at top
-        #DEMReader("dem/05-auckland-15m-1-0001-0001_uncompressed.tif",8000,12000,48000,19200,55999,31199,639,True),
-        #DEMReader("dem/05-auckland-15m-1-0001-0001_uncompressed.tif",8000,12000,48000,19200,55999,31199,639)
-        #DEMReader("updem/05-auckland-15m_0001-0001_uncompressed.tif",2845,2651,48000,19956,50844,22606,640),
-#    DEMReader("subset_dem/05-auckland-15m-subset01-1x1.tif",2000,3000,48000,19200,49999,22199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset02-1x2.tif",2000,3000,50000,19200,51999,22199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset03-1x3.tif",2000,3000,52000,19200,53999,22199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset04-1x4.tif",2000,3000,54000,19200,55999,22199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset05-2x1.tif",2000,3000,48000,22200,49999,25199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset06-2x2.tif",2000,3000,50000,22200,51999,25199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset07-2x3.tif",2000,3000,52000,22200,53999,25199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset08-2x4.tif",2000,3000,54000,22200,55999,25199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset09-3x1.tif",2000,3000,48000,25200,49999,28199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset10-3x2.tif",2000,3000,50000,25200,51999,28199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset11-3x3.tif",2000,3000,52000,25200,53999,28199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset12-3x4.tif",2000,3000,54000,25200,55999,28199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset13-4x1.tif",2000,3000,48000,28200,49999,31199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset14-4x2.tif",2000,3000,50000,28200,51999,31199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset15-4x3.tif",2000,3000,52000,28200,53999,31199,639),
-#    DEMReader("subset_dem/05-auckland-15m-subset16-4x4.tif",2000,3000,54000,28200,55999,31199,639),
-    DEMReader("subset_dem/05-auckland-15m-subset01-1x1.tif", 2000, 3000, 48000, 19200, 49999, 22199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset02-1x2.tif", 2000, 3000, 50000, 19200, 51999, 22199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset03-1x3.tif", 2000, 3000, 52000, 19200, 53999, 22199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset04-1x4.tif", 2000, 3000, 54000, 19200, 55999, 22199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset05-2x1.tif", 2000, 3000, 48000, 22200, 49999, 25199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset06-2x2.tif", 2000, 3000, 50000, 22200, 51999, 25199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset07-2x3.tif", 2000, 3000, 52000, 22200, 53999, 25199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset08-2x4.tif", 2000, 3000, 54000, 22200, 55999, 25199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset09-3x1.tif", 2000, 3000, 48000, 25200, 49999, 28199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset10-3x2.tif", 2000, 3000, 50000, 25200, 51999, 28199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset11-3x3.tif", 2000, 3000, 52000, 25200, 53999, 28199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset12-3x4.tif", 2000, 3000, 54000, 25200, 55999, 28199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset13-4x1.tif", 2000, 3000, 48000, 28200, 49999, 31199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset14-4x2.tif", 2000, 3000, 50000, 28200, 51999, 31199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset15-4x3.tif", 2000, 3000, 52000, 28200, 53999, 31199, 639, True),
-    DEMReader("subset_dem/05-auckland-15m-subset16-4x4.tif", 2000, 3000, 54000, 28200, 55999, 31199, 639, True),
-    #DEMReader("dem/04-dargaville-15m_0001-0001_uncompressed.tif",400,2607,47600,19950,47999,22556,640)
-]
+    DEM_list_path = "geotiff summary 1000x1000 no overlap.txt"
+
     def __init__(self):
         self.active_reader_deque = deque()
+        self.DEM_grid = []
+        self.read_list()
 
-    def get_value(self, x, y):
+    def read_list(self):
         """
-    Get height of point ``x,y`` from this DEM set.
-    Raises ``IndexError`` if point is out-of-range.
+        Read list of DEMs from text file.
 
-    x, y : number, integers
+        """
+        # logic: All DEMs should be spaced in discrete non-overlapping grid.
+        #        Fill this grid with DEM_reader objects for quick lookup.
+        DEM_list = open(self.DEM_list_path)
 
-    """
-        # logic: Check through all readers available in set for one that contains
-        #        x,y. Increase efficiency by storing readers that have been previously
-        #        used and opened by the set and checking these first.
+        field_names = None
+        for line in DEM_list:
+          if line[0]=='#': continue
+          tokens = line.strip().split('\t')
+          if field_names is None:
+            field_names = tokens
+            continue
+          value_dict = {}
+          for field_name,field_value in izip(field_names,tokens):
+            if field_name == "image_E0" or field_name == "image_N0":
+              field_value = float(field_value)
+            elif field_name == "path":
+              pass
+            else:
+              field_value = int(field_value)
+            value_dict[field_name] = field_value
 
-        for DEM_reader in self.active_reader_deque:
-            # iterate over active readers
-            if DEM_reader.within_bounds(x, y):
+          DEM_reader = DEMReader(value_dict,True)
+          image_grid_x0 = DEM_reader.image_x0/self.DEM_reader_grid_resolution
+          image_grid_y0 = DEM_reader.image_y0/self.DEM_reader_grid_resolution
+          image_grid_xn = DEM_reader.image_xn/self.DEM_reader_grid_resolution
+          image_grid_yn = DEM_reader.image_yn/self.DEM_reader_grid_resolution
+          if DEM_reader.image_x0 - image_grid_x0*self.DEM_reader_grid_resolution!=0 or \
+             DEM_reader.image_y0 - image_grid_y0*self.DEM_reader_grid_resolution!=0 or \
+             DEM_reader.image_xn+1 - (image_grid_xn+1)*self.DEM_reader_grid_resolution!=0 or \
+             DEM_reader.image_yn+1 - (image_grid_yn+1)*self.DEM_reader_grid_resolution!=0:
+              raise Exception("{path} is does not completely fill grid".format(**value_dict))
+
+          while len(self.DEM_grid)<image_grid_yn+1: self.DEM_grid.append([])
+          for image_grid_y in range(image_grid_y0,image_grid_yn+1):
+            DEM_grid_row = self.DEM_grid[image_grid_y]
+            while len(DEM_grid_row)<image_grid_xn+1: DEM_grid_row.append(None)
+            for image_grid_x in range(image_grid_x0,image_grid_xn+1):
+              if DEM_grid_row[image_grid_x] is None:
+                DEM_grid_row[image_grid_x] = DEM_reader
+              else:
+                raise Exception('>1 DEM for grid {}x{}'.format(image_grid_x,image_grid_y))
+
+        DEM_list.close()
+
+    def get_value(self, x, y, raise_exception = False):
+        """
+        Get height of point ``x,y`` from this DEM set.
+        If ``raise_exception`` is ``true``, 
+        raises ``IndexError`` if point is out-of-range.
+        Otherwise, return ``nan``.
+
+        x, y : number, integers
+
+        """
+        # logic: Find correct reader from grid. Maintain deque of active readers
+        #        and deactivate oldest if >max number of allowed max readers.
+        image_grid_x = x/self.DEM_reader_grid_resolution
+        image_grid_y = y/self.DEM_reader_grid_resolution
+        try:
+            DEM_reader = self.DEM_grid[image_grid_y][image_grid_x]
+            if DEM_reader is not None:
+                assert(DEM_reader.within_bounds(x, y))
+                if not DEM_reader.is_active():
+                    DEM_reader.activate()
+                    self.active_reader_deque.appendleft(DEM_reader) # store as an active reader
                 ret = DEM_reader.get_value(x, y)
                 assert ret != None
-                return ret
-
-        for DEM_reader in self.DEM_reader_list:
-            if DEM_reader.within_bounds(x, y):
-                DEM_reader.activate()
-                self.active_reader_deque.appendleft(DEM_reader) # store as an active reader
                 if len(self.active_reader_deque) > self.max_active_readers:
-                    self.active_reader_deque.pop() # remove oldest if too many active readers
-                ret = DEM_reader.get_value(x, y)
-                assert ret != None
+                    oldest_reader = self.active_reader_deque.pop() # remove oldest if too many active readers
+                    oldest_reader.deactivate()
                 return ret
+        except IndexError:
+            pass
 
+        if not raise_exception: return float('nan')
         raise IndexError("out of DEM bounds") # no DEMs contain this point
 
     def nearest_DEM(self, E, N):
         """
-    Get height of nearest DEM point to ``E,N`` from this DEM set.
-    Raises ``IndexError`` if point is out-of-range.
+        Get height of nearest DEM point to ``E,N`` from this DEM set.
+        Raises ``IndexError`` if point is out-of-range.
 
-    E, N: number, float
-      map coordinates in grid units
-    """
+        E, N: number, float
+          map coordinates in grid units
+        """
 
         x = (E-self.set0_E) / self.voxelE
         y = (N-self.set0_N) / self.voxelN
