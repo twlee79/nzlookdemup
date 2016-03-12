@@ -21,7 +21,7 @@ Copyright (c) 2014 Tet Woo Lee
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from demset import DEMSet
+#from demset import DEMSet
 import math
 
 set0_E = 1012007.5 # central coordinate of top-left pixel in DEM set
@@ -30,25 +30,87 @@ voxelE = 15.0 # voxel sizes in DEM set
 voxelN = -15.0
 # x and y defined in terms of these coordinates
 
-demset = DEMSet()
+# convert E,N coords to x,y in DEM grid and vice versa
+EN_to_xy = lambda EN: ((EN[0]-set0_E) / voxelE, (EN[1]-set0_N) / voxelN )
+xy_to_EN = lambda xy: ( xy[0] * voxelE + set0_E, xy[1] * voxelN + set0_N )
 
-"""
-Path interpolation algorithm:
 
-for each leg calculate cumuldist up to start, legdist
-calc total cumuldist
-stepsize = cumultdist/(steps-1)
-for each step:
-    stepdist = step_i*stepsize
-    while stepdist>=legstart and stepdist<=legstart+legdist: next leg
-        # gets leg for this stepdist
-    legdistfraction = (stepdist-legstart)/legdist
-    assert legdistfraction>=0.0 and legdistfraction<=1.0
-    dx = leg_dx*legdistfraction
-    dy = leg_dy*legdistfraction
-    interpolate for leg_x+dx, leg_y+dy
+deltas = lambda xy1,xy2: ( (xy2[0]-xy1[0]), (xy2[1]-xy1[1]) )
 
-"""
+# return distance of pairs of coordinates
+dist_xy = lambda xy1,xy2: ( (xy2[0]-xy1[0])**2 + (xy2[1]-xy1[1])**2 ) ** 0.5
+
+#demset = DEMSet()
+
+def pairs(it):
+    """
+    Return pairs of items for an iterator.
+    By: Glenn Maynard
+    http://stackoverflow.com/questions/3929039/python-for-loop-how-to-find-next-valueobject
+
+    """
+    it = iter(it)
+    prev = next(it)
+    for v in it:
+        yield prev, v
+        prev = v
+
+def cumulsum0(it):
+    """
+    Produce cumulative sum for iterator, starting with 0 (before any element)
+    """
+    total = 0
+    yield total
+    for item in it:
+        total += item
+        yield total
+
+def interpolate_path_simple(path, samples=11):
+
+    """
+    Path interpolation algorithm:
+
+    for each leg calculate cumuldist up to start, legdist
+    calc total cumuldist
+    stepsize = cumultdist/(steps-1)
+    for each step:
+        stepdist = step_i*stepsize
+        while stepdist>=legstart and stepdist<=legstart+legdist: next leg
+            # gets leg for this stepdist
+        legdistfraction = (stepdist-legstart)/legdist
+        assert legdistfraction>=0.0 and legdistfraction<=1.0
+        dx = leg_dx*legdistfraction
+        dy = leg_dy*legdistfraction
+        interpolate for leg_x+dx, leg_y+dy
+
+    """
+    path_xy = map(EN_to_xy,path)
+    path_dxdy = [ deltas(xy1,xy2) for xy1,xy2 in pairs(path_xy) ]
+    path_dxy = [ dist_xy(xy1,xy2) for xy1,xy2 in pairs(path_xy) ]
+    cumul_dxy = list(cumulsum0(path_dxy))
+    total_dxy = cumul_dxy[-1]
+    stepxy = total_dxy / (samples-1)
+    nextleg = 0
+    for sample in range(samples):
+        if sample==0: # first sample = first coord in path
+            x,y = path_xy[0]
+        elif sample==samples-1: # last sample = last coord in path
+            x,y = path_xy[-1]
+        else:
+            sample_dxy = sample*stepxy
+            while sample_dxy>=cumul_dxy[nextleg] and\
+                  sample_dxy<=cumul_dxy[nextleg+1]: nextleg+=1
+            leg = nextleg-1
+            leg_fraction = (sample_dxy - cumul_dxy[leg]) / path_dxy[leg]
+            assert leg_fraction>=0.0 and leg_fraction<=1.0
+            leg_x, leg_y = path_xy[leg]
+            leg_dx, leg_dy = path_dxdy[leg]
+            x = leg_x + (leg_dx*leg_fraction)
+            y = leg_y + (leg_dy*leg_fraction)
+        print x,y
+        #q = demset.interpolate_DEMxy(x, y)
+
+interpolate_path_simple(path,11)
 
 def interpolate_line_simple(E1, N1, E2, N2, samples=11):
     """
@@ -196,8 +258,8 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
     interpolate height values from the DEM using linear interpolation.
 
     If ``samples`` is not None, will interpolate with given number of samples
-    along line. Otherwise,advanced line interpolation algorithm than will 
-    produce a simplified but maximal resolution line interpolated in height 
+    along line. Otherwise,advanced line interpolation algorithm than will
+    produce a simplified but maximal resolution line interpolated in height
     (``q``) direction.
 
     How it works:
