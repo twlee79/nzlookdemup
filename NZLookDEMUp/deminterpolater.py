@@ -2,9 +2,11 @@
 
 """
 DEMInterpolater module
-version 13a
+version 14
 Copyright (c) 2014 Tet Woo Lee
 """
+#TODO: Rationalise calling simple/ideal algorithm with either E/N or x/y coords
+#TODO: Check for indentation issues
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,35 +32,56 @@ voxelN = -15.0
 
 demset = DEMSet()
 
+"""
+Path interpolation algorithm:
 
-def line_DEM_profile_naive(x1, y1, x2, y2, steps=11):
+for each leg calculate cumuldist up to start, legdist
+calc total cumuldist
+stepsize = cumultdist/(steps-1)
+for each step:
+    stepdist = step_i*stepsize
+    while stepdist>=legstart and stepdist<=legstart+legdist: next leg
+        # gets leg for this stepdist
+    legdistfraction = (stepdist-legstart)/legdist
+    assert legdistfraction>=0.0 and legdistfraction<=1.0
+    dx = leg_dx*legdistfraction
+    dy = leg_dy*legdistfraction
+    interpolate for leg_x+dx, leg_y+dy
+
+"""
+
+def interpolate_line_simple(E1, N1, E2, N2, samples=11):
     """
-    Naive algorithm that returns a DEM profile along a line
+    Simple algorithm that returns a DEM profile along a line
     by simply interpolation. Starts at
     ``x1, y1``, and moves toward ``x2, y2`` in step distances
     until reaching or going past ``x2, y2``.
 
-    Returns a list of ``(x, y, q, index)`` tuples, where ``x, y`` are
-    coordinates of interpolation points, ``q`` is DEM height
+    Returns a list of ``(E, N, q, index)`` tuples, where ``E, N`` are
+    easting/northing coordinates of interpolation points, ``q`` is DEM height
     and ``index`` is the index of the point; the first point has an index
     of 0 and the last point has an index of -2
 
     Does not catch IndexErrors from failed DEM lookups, so these
     will be propagated to the caller.
 
-    x1, y1: numbers
-      start point
-    x1, y1: numbers
-      end point
-    steps : number
-      number of steps
+    E1, N1, E2, N2 : numbers
+      NZTM2000 coordinates of line to interpolate
+    samples : number
+      number of samples
     """
+
+    # find starting and ending x/y coordinates
+    x1 = (E1-set0_E) / voxelE
+    y1 = (N1-set0_N) / voxelN
+    x2 = (E2-set0_E) / voxelE
+    y2 = (N2-set0_N) / voxelN
 
     # determine x, y step sizes
     dx = x2-x1
     dy = y2-y1
-    stepx = dx / (steps-1) # -1 because we want to include first/last points
-    stepy = dy / (steps-1)
+    stepx = dx / (samples-1) # -1 because we want to include first/last points
+    stepy = dy / (samples-1)
 
     # start at x1, y1
     x = x1
@@ -119,7 +142,7 @@ def line_DEM_profile_naive(x1, y1, x2, y2, steps=11):
     N = y * voxelN + set0_N
     index = -2 # last point has index -2
     #track.append((x, y, q, dist))
-    #track.append((E, N, q,"naive"))
+    #track.append((E, N, q,"simple"))
     track.append((E, N, q, index))
     return track
 
@@ -172,8 +195,10 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
     Given a continuous line that passes through a discrete DEM image, will
     interpolate height values from the DEM using linear interpolation.
 
-    Advanced line interpolation algorithm than will produce a simplified but
-    maximal resolution line interpolated in height (``q``) direction.
+    If ``samples`` is not None, will interpolate with given number of samples
+    along line. Otherwise,advanced line interpolation algorithm than will 
+    produce a simplified but maximal resolution line interpolated in height 
+    (``q``) direction.
 
     How it works:
     1) Assume line is running through an x/y grid of DEM points.
@@ -211,14 +236,14 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
     d_q : delta of q from last point, None in first segment
     index : increasing index number of the point(up to last point), may not be sequential
     but first point   will always be ``0`` and last point will be <0 (-1 if this algorithm
-    used, -2 if naive algorithm used because line was too long)
+    used, -2 if simple algorithm used because line was too long)
 
 
     Does not catch IndexErrors from failed DEM lookups, so these
     will be propagated to the caller.
 
     If line length is more than 300 voxels in one direction,
-    naive algorithm will be used instead.
+    simple algorithm will be used instead.
     """
 
     # find starting and ending x/y coordinates
@@ -235,8 +260,8 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
 
     if abs_dx > 300 or abs_dy > 300:
         # line length for this algorithm exceeded
-        # use naive algorithm
-        return line_DEM_profile_naive(x0, y0, x1, y1, steps=11)
+        # use simple algorithm
+        return interpolate_line_simple(E0, N0, E1, N1)
 
     #start at point 0
     x = x0
@@ -420,14 +445,14 @@ def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
                 x = x0 + (y-y0) / dy * dx # determine x at this whole y
 
                 # reassign/get/calculate q and delta values
-        qmm = qmp
-        qpm = qpp
-        qmp = demset.get_value(x_int_m, y_int_p)
-        qpp = demset.get_value(x_int_p, y_int_p)
-        dxm = abs(x - x_int_m)
-        dxp = abs(x_int_p - x)
-        dym = 0.0
-        dyp = 1.0
+                qmm = qmp
+                qpm = qpp
+                qmp = demset.get_value(x_int_m, y_int_p)
+                qpp = demset.get_value(x_int_p, y_int_p)
+                dxm = abs(x - x_int_m)
+                dxp = abs(x_int_p - x)
+                dym = 0.0
+                dyp = 1.0
 
-        q = qmm * dxp + qpm * dxm # interpolate y at whole x point
+                q = qmm * dxp + qpm * dxm # interpolate y at whole x point
     return track

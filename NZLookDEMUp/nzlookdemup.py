@@ -10,6 +10,8 @@ import cloudstorage
 import os
 from google.appengine.api import app_identity
 import sys
+import json
+import traceback
 
 class BaseHandler(webapp2.RequestHandler):
     """
@@ -215,12 +217,138 @@ class TestGCS(BaseHandler):
         stats = cloudstorage.listbucket(bucket + '/', max_keys=page_size,
                                marker=stat.filename)
 
+#Elevation Statuses
 
+#OK indicating the service request was successful
+#INVALID_REQUEST indicating the service request was malformed
+#OVER_QUERY_LIMIT indicating that the requestor has exceeded quota
+#REQUEST_DENIED indicating the service did not complete the request, likely because on an invalid parameter
+#UNKNOWN_ERROR indicating an unknown error
+
+# For advanced interpolation, should return an index or something to indicate original points
+
+class ElevationGet(webapp2.RequestHandler):
+    def __init__(self, request, response):
+        # Set self.request, self.response and self.app.
+        self.initialize(request, response)
+
+        self.response_object = {}
+        self.is_error = False
+    def set_status_ok(self):
+        self.is_error = False
+        self.response_object['status'] = 'OK'
+    def set_status_error(self,status,error_message=None,traceback=None):
+        self.is_error = True
+        self.response_object['status'] = status
+        if error_message is not None: self.response_object['error_message'] = error_message
+        if traceback is not None: self.response_object['traceback'] = traceback
+    def get(self):
+        if self.request.path=="/elevation/json":
+            pass
+        elif self.request.path=="/elevation/xml":
+            # xml requests, not implemented
+            self.abort(501)
+        else:
+            # no other requests specified
+            self.abort(404)
+
+        
+        locations_str = self.request.get("locations", default_value=None)
+        path_str = self.request.get("path", default_value=None)
+        samples_str = self.request.get("samples", default_value=None)
+        latlngs = []
+        try:
+            if locations_str is not None: 
+                latlngs_str = locations_str
+                is_path = False
+            elif path_str is not None: 
+                latlngs_str = path_str
+                is_path = True
+            else:
+                raise ValueError("no locations or path provided")
+            locations = latlngs_str.split("|")
+            for location in locations:
+                lat,lng = location.split(",")
+                lat = float(lat)
+                lng = float(lng)
+                if lat<-90.0 or lat>+90.0 or lng<-180.0 or lng>+180.0:
+                    raise ValueError("lat or lng out of range")
+                latlngs.append((lat,lng))
+            if samples_str is not None:
+                samples = int(samples_str)
+                if samples == -1: samples = None
+            else: samples = None
+
+        except ValueError as e:
+            self.set_status_error("INVALID_REQUEST","ValueError processing lat,lng coordinates: "+str(e))
+        except Exception as e:
+            tb = traceback.format_exc()
+            self.set_status_error("UNKNOWN_ERROR",str(e),tb)
+        
+        if not self.is_error:
+            try:
+                results = []
+                if is_path:
+                    full_track = []
+                    latlng2 = None
+                    for i, latlng in enumerate(latlngs):
+                        latlng1 = latlng2
+                        latlng2 = latlng
+                        if latlng1 is not None:
+                            point1 = NZTM2000.latlng_to_NZTM(*latlng1)
+                            point2 = NZTM2000.latlng_to_NZTM(*latlng2)
+
+                            if samples is not None:
+                                track = deminterpolater.interpolate_line_simple(point1[0], point1[1], point2[0], point2[1], samples=samples)
+                            else:
+                                track = deminterpolater.interpolate_line_ideal(point1[0], point1[1], point2[0], point2[1])
+                            for point in track:
+                                result = {}
+                                E, N, elevation, index = point
+                                if index==0:
+                                    #if i>1: continue
+                                    #lat,lng = latlng1
+                                    result["path_index"] = i-1
+                                elif index<0:
+                                    #lat,lng = latlng2
+                                    result["path_index"] = i
+ 
+                                lat,lng = NZTM2000.NZTM_to_latlng(E,N)
+                                result["elevation"] = elevation
+                                result["location"] = {"lat":lat,"lng":lng}
+                                results.append(result)
+
+                else:
+                    for latlng in latlngs:
+                        lat,lng = latlng
+                        point1 = NZTM2000.latlng_to_NZTM(lat,lng)
+                        elevation = deminterpolater.demset.interpolate_DEM(*point1)
+                        result = {}
+                        result["elevation"] = elevation
+                        result["location"] = {"lat":lat,"lng":lng}
+                        results.append(result)
+                self.response_object['results']=results
+                self.set_status_ok()
+            except (ValueError,IndexError) as e:
+                # can get here if NZTM2000 out of range, or no DEM for coordinates
+                tb = traceback.format_exc()
+                self.set_status_error("INVALID_REQUEST","Error looking up DEM: "+str(e),tb)
+            except Exception as e:
+                tb = traceback.format_exc()
+                self.set_status_error("UNKNOWN_ERROR",str(e),tb)
+            
+        response = webapp2.Response()
+        response.headers['Content-Type'] = 'application/json'   
+        response.out.write(json.dumps(self.response_object))                
+        
+        return response
 
 application = webapp2.WSGIApplication([
     ('/', UploadForm),
     ('/process_csv', ProcessCSV),
     ('/process_binary', ProcessBinary),
     ('/test_gcs', TestGCS),
+    ('/elevation/json',ElevationGet),
+    ('/elevation/xml',ElevationGet)
     
 ], debug=True)

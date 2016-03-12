@@ -27,6 +27,7 @@ import os
 import struct
 
 bucket_name = '/' + os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
+is_local = os.environ["APPLICATION_ID"].startswith("dev~")
 
 class DEMReader:
     buffer_size = 4 * 1024 * 1024 # need manual buffer for cloud storage, this does not support buffered random i/o (sequential only)
@@ -163,7 +164,7 @@ class DEMSet:
               field_value = int(field_value)
             value_dict[field_name] = field_value
 
-          DEM_reader = DEMReader(value_dict,True)
+          DEM_reader = DEMReader(value_dict, cloud = False if is_local else True)
           image_grid_x0 = DEM_reader.image_x0/self.DEM_reader_grid_resolution
           image_grid_y0 = DEM_reader.image_y0/self.DEM_reader_grid_resolution
           image_grid_xn = DEM_reader.image_xn/self.DEM_reader_grid_resolution
@@ -186,7 +187,7 @@ class DEMSet:
 
         DEM_list.close()
 
-    def get_value(self, x, y, raise_exception = False):
+    def get_value(self, x, y, raise_exception = True):
         """
         Get height of point ``x,y`` from this DEM set.
         If ``raise_exception`` is ``true``, 
@@ -238,12 +239,12 @@ class DEMSet:
 
     def interpolate_DEM(self, E, N):
         """
-    Get interpolated height of point ``E,N`` from this DEM set.
-    Raises ``IndexError`` if point is out-of-range.
+        Get interpolated height of point ``E,N`` from this DEM set.
+        Raises ``IndexError`` if point is out-of-range.
 
-    E, N: number, float
-      map coordinates in grid units
-    """
+        E, N: number, float
+          map coordinates in grid units
+        """
 
         x = (E-self.set0_E) / self.voxelE
         y = (N-self.set0_N) / self.voxelN
@@ -252,12 +253,12 @@ class DEMSet:
 
     def interpolate_DEMxy(self, x, y):
         """
-    Get interpolate height of point ``x,y`` from this DEM set.
-    Raises ``IndexError`` if point is out-of-range.
+        Get interpolate height of point ``x,y`` from this DEM set.
+        Raises ``IndexError`` if point is out-of-range.
 
-    x, y: number, float
-      DEM coordinates in pixels
-    """
+        x, y: number, float
+          DEM coordinates in pixels
+        """
 
         x1 = int(x // 1) # get surrounding integer points of x,y
         y1 = int(y // 1)
