@@ -20,6 +20,7 @@ Copyright (c) 2014-2016 Tet Woo Lee
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from demset import DEMSet
+from nztm2000 import NZTM2000
 import math
 
 set0_E = 1012007.5 # central coordinate of top-left pixel in DEM set
@@ -73,17 +74,15 @@ def interpolate_path_bysamples(path, samples=11):
             number of samples to interpolate from path
     
     Return:
-        out : list of (float,float,float,integer) tuples
-            List of points in interpolated path as ``(E,N,elevation,point_index)`` 
-            tuples. ``E,N`` are NZTM coordinates of interpolated point, 
+        out : list of (float,float,float) tuples
+            List of points in interpolated path as ``(E,N,elevation)`` 
+            tuples. ``E,N`` are NZTM coordinates of interpolated point and 
             ``elevation`` is elevation of interpolated point above sea-level in
-            metres and ``point_index`` is the index of that point in the original
-            path, with ``point_index=-1`` for interpolated points not in the
-            original path. (For this algorithm, only the first and last returned
-            points will have ``point_index`` values).
+            metres.
 
     """
     samples = min(HardLimits.max_path_steps,samples)
+    samples = max(samples,2)
 
     # convert to x,y in DEM grid
     path_xy = map(EN_to_xy,path)
@@ -106,11 +105,9 @@ def interpolate_path_bysamples(path, samples=11):
         if sample==0: # first sample = first coord in path
             x,y = path_xy[0]
             E,N = path[0]
-            point_index = 0
         elif sample==samples-1: # last sample = last coord in path
-            point_index = len(path)-1
-            x,y = path_xy[point_index]
-            E,N = path[point_index]
+            x,y = path_xy[-1]
+            E,N = path[-1]
         else:
             # other sample, interpolate along path
             sample_dxy = sample*stepxy # expected distance
@@ -125,9 +122,8 @@ def interpolate_path_bysamples(path, samples=11):
             x = leg_x + (leg_dx*leg_fraction)
             y = leg_y + (leg_dy*leg_fraction)
             E,N = xy_to_EN((x,y))
-            point_index = -1
         q = demset.interpolate_DEMxy(x, y)
-        track.append((E, N, q, point_index))
+        track.append((E, N, q))
     return track
 
 
@@ -148,18 +144,16 @@ def interpolate_line_bysamples(E0, N0, E1, N1, samples=11):
             number of samples to interpolate along line
     
     Return:
-        out : list of (float,float,float,integer) tuples
-            List of points in interpolated path as ``(E,N,elevation,point_index)`` 
-            tuples. ``E,N`` are NZTM coordinates of interpolated point, 
+        out : list of (float,float,float) tuples
+            List of points in interpolated path as ``(E,N,elevation)`` 
+            tuples. ``E,N`` are NZTM coordinates of interpolated point and 
             ``elevation`` is elevation of interpolated point above sea-level in
-            metres and ``point_index`` is the index of that point in the original
-            path, with ``point_index=-1`` for interpolated points not in the
-            original path. (For this algorithm, only the first and last returned
-            points will have ``point_index`` values).
+            metres.
 
     """
     
     samples = min(HardLimits.max_line_steps,samples)
+    samples = max(samples,2)
 
     # find starting and ending x/y coordinates
     x0,y0 = EN_to_xy((E0,N0))
@@ -170,26 +164,21 @@ def interpolate_line_bysamples(E0, N0, E1, N1, samples=11):
     dy = y1-y0
 
     # interpolate
-    x = x0
-    y = y0
     track = []
     for sample in range(samples):
         if sample==0: # first sample = first coord
             x,y = x0,y0
             E,N = E0,N0
-            path_index = 0
         elif sample==samples-1: # last sample = last coord
             x,y = x1,y1
             E,N = E1,N1
-            path_index = 1
         else:
             fraction = float(sample)/(samples-1)
-            x += x0 + fraction*dx
-            y += y0 + fraction*dy
+            x = x0 + fraction*dx
+            y = y0 + fraction*dy
             E,N = xy_to_EN((x,y))
-            path_index = -1
         q = demset.interpolate_DEMxy(x, y)
-        track.append((E, N, q, path_index))
+        track.append((E, N, q))
 
     return track
 
@@ -207,58 +196,63 @@ def interpolate_line_bysteps(E0, N0, E1, N1, stepsize = 100.0):
         
         E0, N0, E1, N1 : floats
             NZTM2000 coordinates of line to interpolate
-        samples : float
-            size of each step to interpolate along line
+        stepsize : float
+            size of each step (NZTM2000 metres) to interpolate along line
     
     Return:
-        out : list of (float,float,float,integer) tuples
-            List of points in interpolated path as ``(E,N,elevation,point_index)`` 
-            tuples. ``E,N`` are NZTM coordinates of interpolated point, 
+        out : list of (float,float,float) tuples
+            List of points in interpolated path as ``(E,N,elevation)`` 
+            tuples. ``E,N`` are NZTM coordinates of interpolated point and 
             ``elevation`` is elevation of interpolated point above sea-level in
-            metres and ``point_index`` is the index of that point in the original
-            path, with ``point_index=-1`` for interpolated points not in the
-            original path. (For this algorithm, only the first and last returned
-            points will have ``point_index`` values).
+            metres.
 
     """
 
     # find starting and ending x/y coordinates
+    print E0,N0
+    print E1,N1
     x0,y0 = EN_to_xy((E0,N0))
     x1,y1 = EN_to_xy((E1,N1))
 
     # determine deltas
+    dE = E1-E0
+    dN = N1-N0
+    dNE = ( dE**2 + dN**2) ** 0.5
     dx = x1-x0
     dy = y1-y0
     dxy = ( dx**2 + dy**2 ) ** 0.5
     
+    # determine point scale factor
+    # unnecessary to be this precise
+    #k = NZTM2000.NZTM_k(E0,N0)
+    #dNE*=k # multiply distance by point scale
+    
     # ensure stepsize does cause # samples to exceed limit
     stepsize = abs(stepsize) # negative stepsizes will cause infinite loop
-    stepsize = min(stepsize,dxy/HardLimits.max_line_steps)
+    stepsize = max(stepsize,dxy/HardLimits.max_line_steps)
 
     # interpolate
-    x = x0
-    y = y0
     track = []
-    sample_dxy = 0.0
-    while True:
-        if sample_dxy==0.0: # first sample = first coord
+    sample_dNE = 0.0
+    done = False
+    while not done:
+        print sample_dNE,dNE
+        if sample_dNE==0.0: # first sample = first coord
             x,y = x0,y0
             E,N = E0,N0
-            path_index = 0
         else:
-            fraction = sample_dxy/dxy
+            fraction = sample_dNE/dNE
             if fraction>=1.0: # exceeded total distance, i.e last sample = last coord
                 x,y = x1,y1
                 E,N = E1,N1
-                path_index = 1
+                done = True
             else:
-                x += x0 + fraction*dx
-                y += y0 + fraction*dy
+                x = x0 + fraction*dx
+                y = y0 + fraction*dy
                 E,N = xy_to_EN((x,y))
-                path_index = -1
         q = demset.interpolate_DEMxy(x, y)
-        track.append((E, N, q, path_index))
-        sample_dxy += stepsize
+        track.append((E, N, q))
+        sample_dNE += stepsize
  
     return track
 
@@ -368,16 +362,12 @@ def interpolate_line_smart(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
         force_minmax : boolean
           whether to force min/max points on line to be kept regardless of grade_delta
 
-   Return:
-   
-        out : list of (float,float,float,integer) tuples
-            List of points in interpolated path as ``(E,N,elevation,point_index)`` 
-            tuples. ``E,N`` are NZTM coordinates of interpolated point, 
+    Return:
+        out : list of (float,float,float) tuples
+            List of points in interpolated path as ``(E,N,elevation)`` 
+            tuples. ``E,N`` are NZTM coordinates of interpolated point and 
             ``elevation`` is elevation of interpolated point above sea-level in
-            metres and ``point_index`` is the index of that point in the original
-            path, with ``point_index=-1`` for interpolated points not in the
-            original path. (For this algorithm, only the first and last returned
-            points will have ``point_index`` values).
+            metres.
  
     """
 
@@ -485,17 +475,15 @@ def interpolate_line_smart(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=Tr
 
         E = x * voxelE + set0_E
         N = y * voxelN + set0_N
-        #track.append((E, N, dist, q, grade, d_dist, d_q))
-        #track.append((E, N, q,"ideal"))
-        track.append((E, N, q, index))
+        track.append((E, N, q))
 
 
         if x == x1 and y == y1:
             # reached end point
             if index != -1:
-                # ensure always add a -1 point
+                # ensure always add last point
                 # may get here if point0 == point1
-                track.append((E, N, q, -1))
+                track.append((E, N, q))
             break
 
         index += 1

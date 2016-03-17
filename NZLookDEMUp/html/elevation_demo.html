@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+    <meta charset="utf-8">
+    <title>Showing elevation along a path</title>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      #map {
+        height: 100%;
+      }
+    </style>
+    <script src="https://www.google.com/jsapi"></script>
+  </head>
+  <body>
+    <div>
+      <div id="map" style="height:250px;"></div>
+      <div id="elevation_chart"></div>
+      <script type="text/javascript" src="nz_twlee_demlookup.js">
+      </script>
+      <script>
+        // Load the Visualization API and the columnchart package.
+      google.load('visualization', '1', {packages: ['corechart']});
+      //var elevator = new google.maps.ElevationService;
+      var elevator = new nztwlee.demlookup.ElevationService;
+
+      function initMap() {
+        // The following is a path up Mt Eden in Auckland
+        var path = [
+
+            {lat: -36.878070, lng: 174.764220},
+            {lat: -36.874531, lng: 174.762107},
+            {lat: -36.874530, lng: 174.762100},
+            {lat: -36.874500, lng: 174.762110},
+            {lat: -36.874530, lng: 174.762460},
+            {lat: -36.874490, lng: 174.762470},
+            {lat: -36.874450, lng: 174.762490},
+            {lat: -36.874440, lng: 174.762500},
+            {lat: -36.874410, lng: 174.762520},
+            {lat: -36.874380, lng: 174.762550},
+            {lat: -36.874060, lng: 174.762940},
+            {lat: -36.874010, lng: 174.763020},
+            {lat: -36.873950, lng: 174.763120},
+            {lat: -36.873920, lng: 174.763220},
+            {lat: -36.873890, lng: 174.763300},
+            {lat: -36.873870, lng: 174.763450},
+            {lat: -36.873840, lng: 174.763560},
+            {lat: -36.873800, lng: 174.763690},
+            {lat: -36.873750, lng: 174.763810},
+            {lat: -36.873730, lng: 174.763860},
+            {lat: -36.873620, lng: 174.764050},
+            {lat: -36.873520, lng: 174.764190},
+            {lat: -36.873500, lng: 174.764210},
+            {lat: -36.873520, lng: 174.764250},
+            {lat: -36.873520, lng: 174.764290},
+            {lat: -36.873510, lng: 174.764320},
+            {lat: -36.873490, lng: 174.764350},
+            {lat: -36.873550, lng: 174.764450},
+            {lat: -36.873560, lng: 174.764470},
+            {lat: -36.873570, lng: 174.764480},
+            {lat: -36.873600, lng: 174.764510},
+            {lat: -36.873630, lng: 174.764540},
+            {lat: -36.873660, lng: 174.764560},
+            {lat: -36.873710, lng: 174.764570},
+            {lat: -36.873750, lng: 174.764580},
+            {lat: -36.873770, lng: 174.764580},
+            {lat: -36.873820, lng: 174.764570},
+            {lat: -36.873870, lng: 174.764550},
+            {lat: -36.873900, lng: 174.764530},
+            {lat: -36.873940, lng: 174.764490},
+            {lat: -36.873960, lng: 174.764470},
+            {lat: -36.874000, lng: 174.764450},
+            {lat: -36.874070, lng: 174.764410},
+            {lat: -36.874250, lng: 174.764340},
+            {lat: -36.874420, lng: 174.764300},
+            {lat: -36.874640, lng: 174.764250},
+            {lat: -36.874810, lng: 174.764210},
+            {lat: -36.874990, lng: 174.764150},
+            {lat: -36.875060, lng: 174.764140},
+            {lat: -36.875110, lng: 174.764120},
+            {lat: -36.875220, lng: 174.764110},
+            {lat: -36.875270, lng: 174.764100},
+            {lat: -36.875310, lng: 174.764110},
+            {lat: -36.875360, lng: 174.764120},
+            {lat: -36.875430, lng: 174.764150},
+            {lat: -36.875710, lng: 174.764340},
+            {lat: -36.875750, lng: 174.764360},
+            {lat: -36.875790, lng: 174.764380},
+            {lat: -36.875830, lng: 174.764390},
+            {lat: -36.875870, lng: 174.764390},
+            {lat: -36.875910, lng: 174.764390},
+            {lat: -36.875950, lng: 174.764370},
+            {lat: -36.875980, lng: 174.764350},
+            {lat: -36.876040, lng: 174.764320},
+            {lat: -36.876110, lng: 174.764270},
+            {lat: -36.876180, lng: 174.764200},
+            {lat: -36.876250, lng: 174.764160},
+            {lat: -36.876390, lng: 174.764110},
+            {lat: -36.876580, lng: 174.764050},
+            {lat: -36.876620, lng: 174.764040},
+            {lat: -36.876680, lng: 174.764000},
+            {lat: -36.876730, lng: 174.763950},
+            {lat: -36.876760, lng: 174.763910},
+            {lat: -36.876790, lng: 174.763860},
+            {lat: -36.876810, lng: 174.763810},
+            {lat: -36.876840, lng: 174.763740},
+            {lat: -36.876850, lng: 174.763680},
+            {lat: -36.876860, lng: 174.763630},
+            {lat: -36.876900, lng: 174.763350},
+            {lat: -36.876910, lng: 174.763290},
+            {lat: -36.876930, lng: 174.763240},
+            {lat: -36.877040, lng: 174.763120},
+            {lat: -36.877080, lng: 174.763250},
+            {lat: -36.877090, lng: 174.763280},
+            {lat: -36.877120, lng: 174.763330},
+            {lat: -36.877160, lng: 174.763370},
+            {lat: -36.877200, lng: 174.763390},
+            {lat: -36.877630, lng: 174.763510},
+            {lat: -36.877680, lng: 174.763530},
+            {lat: -36.877720, lng: 174.763550},
+            {lat: -36.877770, lng: 174.763590},
+            {lat: -36.877820, lng: 174.763620},
+            {lat: -36.877860, lng: 174.763670},
+            {lat: -36.877900, lng: 174.763720},
+            {lat: -36.877940, lng: 174.763790},
+            {lat: -36.877990, lng: 174.763880},
+            {lat: -36.878020, lng: 174.763960},
+            {lat: -36.878040, lng: 174.764040},
+            {lat: -36.878060, lng: 174.764130},
+            {lat: -36.878070, lng: 174.764220},
+            {lat: -36.878070, lng: 174.764310}];
+
+
+        var map = new google.maps.Map(document.getElementById('map'), {
+          zoom: 15,
+          center: path[1]
+        });
+
+        // Create an ElevationService.
+        //var elevator = new google.maps.ElevationService;
+        //var my_elevator = new nztwlee.demlookup.ElevationService;
+
+        // Draw the path, using the Visualization API and the Elevation service.
+        displayPathElevation(path, elevator, map);
+      }
+
+      function displayPathElevation(path, elevator, map) {
+        // Display a polyline of the elevation path.
+        new google.maps.Polyline({
+          path: path,
+          strokeColor: '#0000CC',
+          opacity: 0.4,
+          map: map
+        });
+
+        // Create a PathElevationRequest object using this array.
+        // Ask for 256 samples along that path.
+        // Initiate the path request.
+        //elevator.getElevationForLocations({
+        //  'locations': path,
+        //}, plotElevation);
+        elevator.getElevationAlongPath({
+          'path': path,
+          //'samples': 16
+          //'stepsize' : 100
+        }, plotElevation);
+      }
+
+      // Takes an array of ElevationResult objects, draws the path on the map
+      // and plots the elevation profile on a Visualization API ColumnChart.
+      function plotElevation(elevations, status) {
+        var chartDiv = document.getElementById('elevation_chart');
+        if (status !== google.maps.ElevationStatus.OK) {
+          // Show the error code inside the chartDiv.
+          chartDiv.innerHTML = 'Cannot show elevation: request failed because ' +
+              status;
+          return;
+        }
+        // Create a new chart in the elevation_chart DIV.
+        var chart = new google.visualization.LineChart(chartDiv);
+
+        // Extract the data from which to populate the chart.
+        // Because the samples are equidistant, the 'Sample'
+        // column here does double duty as distance along the
+        // X axis.
+        var data = new google.visualization.DataTable();
+        //data.addColumn('string', 'Sample');
+        var cumul_distance = 0.0;
+        var lastLatLng = null;
+        data.addColumn('number', 'Distance');
+        data.addColumn('number', 'Elevation');
+        for (var i = 0; i < elevations.length; i++) {
+            latLng = elevations[i].location;
+            elevation = elevations[i].elevation;
+            if (lastLatLng) {
+                cumul_distance += google.maps.geometry.spherical.computeDistanceBetween(lastLatLng,latLng);
+            }
+            data.addRow([cumul_distance, elevation]);
+            lastLatLng = latLng;
+
+        }
+
+        // Draw the chart using the data within its DIV.
+        chart.draw(data, {
+          height: 150,
+          pointSize : 5,
+          legend: 'none',
+          titleX: 'Distance (m)',
+          titleY: 'Elevation (m)'
+        });
+      }
+      </script>
+      <script async defer
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCeHw2ekPJOp9LGIwDc2BhuKFrXEz8pNeU&callback=initMap">
+      </script>
+    </div>
+  </body>
+</html>

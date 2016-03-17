@@ -1,5 +1,5 @@
 application: nz-twlee-demlookup
-version: 3
+version: 4
 runtime: python27
 api_version: 1
 threadsafe: true
@@ -22,7 +22,6 @@ skip_files:
 - ^(.*/)?.*/RCS/.*$
 - ^(.*/)?\..*$
 - ^(.*/)?dem/.*$
-- ^(.*/)?simple POST test/.*$
 - ^(.*/)?nztmdem_1000x1000/.*$
 - ^(.*/)?subset_dem/.*$
 - ^(.*/)?.*\.csv$

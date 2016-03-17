@@ -17,12 +17,28 @@
                 <div>CSV</div>
                 <pre>303.33,303.1</pre>
         </ol>
-        
+
         <h2>Data</h2>
-        <form action="/process_csv" method="post">
-          <div><textarea name="content" rows="3" cols="60"></textarea></div>
-          <div><input type="checkbox" checked=""><label>Treat as a path? </label></div>
-          <div><input type="submit" value="Submit"></div>
+        <form action="/elevation" method="post" enctype="multipart/form-data">
+            <div>
+                <input type="file" name="fileupload" accept="text/plain,text/csv,application/json,.csv" />
+            </div>
+            <div>
+                <textarea name="content" rows="10" cols="80"></textarea>
+            </div>
+            <div>
+                <label>Type of lookup:</label>
+                <input type="radio" name="type" value="locations" checked="checked"> Locations
+                <input type="radio" name="type" value="path"> Path
+            </div>
+            <div>
+                <label>Output format:</label>
+                <input type="radio" name="output" value="csv" checked="checked"> CSV
+                <input type="radio" name="output" value="json"> JSON
+            </div>
+            Number of samples <input type="number" name="samples" min="2" max="1000">
+            Interpolation step size (in m) <input type="number" name="stepsize" min="10" max="100000">
+            <div><input type="submit" value="Submit"></div>
         </form>
 
 
