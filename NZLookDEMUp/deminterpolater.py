@@ -2,11 +2,9 @@
 
 """
 DEMInterpolater module
-version 14
-Copyright (c) 2014 Tet Woo Lee
+version 15
+Copyright (c) 2014-2016 Tet Woo Lee
 """
-#TODO: Rationalise calling simple/ideal algorithm with either E/N or x/y coords
-#TODO: Check for indentation issues
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +19,7 @@ Copyright (c) 2014 Tet Woo Lee
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#from demset import DEMSet
+from demset import DEMSet
 import math
 
 set0_E = 1012007.5 # central coordinate of top-left pixel in DEM set
@@ -34,20 +32,21 @@ voxelN = -15.0
 EN_to_xy = lambda EN: ((EN[0]-set0_E) / voxelE, (EN[1]-set0_N) / voxelN )
 xy_to_EN = lambda xy: ( xy[0] * voxelE + set0_E, xy[1] * voxelN + set0_N )
 
+demset = DEMSet()
 
-deltas = lambda xy1,xy2: ( (xy2[0]-xy1[0]), (xy2[1]-xy1[1]) )
-
-# return distance of pairs of coordinates
-dist_xy = lambda xy1,xy2: ( (xy2[0]-xy1[0])**2 + (xy2[1]-xy1[1])**2 ) ** 0.5
-
-#demset = DEMSet()
+class HardLimits:
+    """
+    Sets hard limits for interpolation algorithms.
+    """
+    max_line_steps = 1000 #: Max number of steps per line segment
+    max_path_steps = 10000 #: Max number of steps for a path
+    max_linedist_smart = 5000 #: Max line segment distance for smart interpolation algorithm (otherwise simple algorithm used) 
 
 def pairs(it):
     """
     Return pairs of items for an iterator.
-    By: Glenn Maynard
+    By Glenn Maynard, see
     http://stackoverflow.com/questions/3929039/python-for-loop-how-to-find-next-valueobject
-
     """
     it = iter(it)
     prev = next(it)
@@ -55,184 +54,250 @@ def pairs(it):
         yield prev, v
         prev = v
 
-def cumulsum0(it):
+def interpolate_path_bysamples(path, samples=11):
     """
-    Produce cumulative sum for iterator, starting with 0 (before any element)
+    Simple algorithm that returns a DEM profile along a path by simple 
+    interpolation. Divides path into ``samples-1`` steps then interpolates 
+    elevation at each step starting from first point in ``path`` and ending
+    at last point in ``path``. Note the elevation for internal points in ``path``
+    is not interpolated directly.
+    
+    Does not catch exceptions from failed DEM lookups, so these will be 
+    propagated to the caller.
+
+    Arguments:
+        
+        path : list of (float,float) tuples
+            list of NZTM2000 E,N coordinates
+        samples : integer
+            number of samples to interpolate from path
+    
+    Return:
+        out : list of (float,float,float,integer) tuples
+            List of points in interpolated path as ``(E,N,elevation,point_index)`` 
+            tuples. ``E,N`` are NZTM coordinates of interpolated point, 
+            ``elevation`` is elevation of interpolated point above sea-level in
+            metres and ``point_index`` is the index of that point in the original
+            path, with ``point_index=-1`` for interpolated points not in the
+            original path. (For this algorithm, only the first and last returned
+            points will have ``point_index`` values).
+
     """
-    total = 0
-    yield total
-    for item in it:
-        total += item
-        yield total
+    samples = min(HardLimits.max_path_steps,samples)
 
-def interpolate_path_simple(path, samples=11):
-
-    """
-    Path interpolation algorithm:
-
-    for each leg calculate cumuldist up to start, legdist
-    calc total cumuldist
-    stepsize = cumultdist/(steps-1)
-    for each step:
-        stepdist = step_i*stepsize
-        while stepdist>=legstart and stepdist<=legstart+legdist: next leg
-            # gets leg for this stepdist
-        legdistfraction = (stepdist-legstart)/legdist
-        assert legdistfraction>=0.0 and legdistfraction<=1.0
-        dx = leg_dx*legdistfraction
-        dy = leg_dy*legdistfraction
-        interpolate for leg_x+dx, leg_y+dy
-
-    """
+    # convert to x,y in DEM grid
     path_xy = map(EN_to_xy,path)
-    path_dxdy = [ deltas(xy1,xy2) for xy1,xy2 in pairs(path_xy) ]
-    path_dxy = [ dist_xy(xy1,xy2) for xy1,xy2 in pairs(path_xy) ]
-    cumul_dxy = list(cumulsum0(path_dxy))
-    total_dxy = cumul_dxy[-1]
-    stepxy = total_dxy / (samples-1)
-    nextleg = 0
+    
+    # calculate parameters for start of each leg
+    cumul_dxy = 0
+    legs = []
+    for ((x1,y1),(x2,y2)) in pairs(path_xy):
+        dx = x2 - x1
+        dy = y2 - y1
+        dxy = ( dx**2 + dy**2 ) ** 0.5
+        legs.append((x1,y1,dx,dy,dxy,cumul_dxy))
+        cumul_dxy += dxy
+        
+    # interpolate along path
+    stepxy = cumul_dxy / (samples-1)
+    leg = 0
+    track = []
     for sample in range(samples):
         if sample==0: # first sample = first coord in path
             x,y = path_xy[0]
+            E,N = path[0]
+            point_index = 0
         elif sample==samples-1: # last sample = last coord in path
-            x,y = path_xy[-1]
+            point_index = len(path)-1
+            x,y = path_xy[point_index]
+            E,N = path[point_index]
         else:
-            sample_dxy = sample*stepxy
-            while sample_dxy>=cumul_dxy[nextleg] and\
-                  sample_dxy<=cumul_dxy[nextleg+1]: nextleg+=1
-            leg = nextleg-1
-            leg_fraction = (sample_dxy - cumul_dxy[leg]) / path_dxy[leg]
+            # other sample, interpolate along path
+            sample_dxy = sample*stepxy # expected distance
+            while True:
+                # find correct leg to interpolate this point from
+                leg_x,leg_y,leg_dx,leg_dy,leg_dxy,leg_cumul_dxy = legs[leg]
+                if sample_dxy>=leg_cumul_dxy and \
+                   sample_dxy<=leg_cumul_dxy+leg_dxy: break
+                leg+=1
+            leg_fraction = (sample_dxy - leg_cumul_dxy) / leg_dxy
             assert leg_fraction>=0.0 and leg_fraction<=1.0
-            leg_x, leg_y = path_xy[leg]
-            leg_dx, leg_dy = path_dxdy[leg]
             x = leg_x + (leg_dx*leg_fraction)
             y = leg_y + (leg_dy*leg_fraction)
-        print x,y
-        #q = demset.interpolate_DEMxy(x, y)
-
-interpolate_path_simple(path,11)
-
-def interpolate_line_simple(E1, N1, E2, N2, samples=11):
-    """
-    Simple algorithm that returns a DEM profile along a line
-    by simply interpolation. Starts at
-    ``x1, y1``, and moves toward ``x2, y2`` in step distances
-    until reaching or going past ``x2, y2``.
-
-    Returns a list of ``(E, N, q, index)`` tuples, where ``E, N`` are
-    easting/northing coordinates of interpolation points, ``q`` is DEM height
-    and ``index`` is the index of the point; the first point has an index
-    of 0 and the last point has an index of -2
-
-    Does not catch IndexErrors from failed DEM lookups, so these
-    will be propagated to the caller.
-
-    E1, N1, E2, N2 : numbers
-      NZTM2000 coordinates of line to interpolate
-    samples : number
-      number of samples
-    """
-
-    # find starting and ending x/y coordinates
-    x1 = (E1-set0_E) / voxelE
-    y1 = (N1-set0_N) / voxelN
-    x2 = (E2-set0_E) / voxelE
-    y2 = (N2-set0_N) / voxelN
-
-    # determine x, y step sizes
-    dx = x2-x1
-    dy = y2-y1
-    stepx = dx / (samples-1) # -1 because we want to include first/last points
-    stepy = dy / (samples-1)
-
-    # start at x1, y1
-    x = x1
-    y = y1
-    track = []
-    index = 0 # index of interpolated point
-
-    if dx > 0 and dy > 0: # different end point check depending on dx/dy direction
-        while x < x2 and y < y2:
-            q = demset.interpolate_DEMxy(x, y)
-            dist = ((x-x1) ** 2 + (y-y1) ** 2) ** 0.5
-            E = x * voxelE + set0_E
-            N = y * voxelN + set0_N
-            #track.append((x, y, q, dist))
-            track.append((E, N, q, index))
-            index += 1
-            x += stepx
-            y += stepy
-    elif dx > 0 and dy < 0:
-        while x < x2 and y > y2:
-            q = demset.interpolate_DEMxy(x, y)
-            #dist = ((x-x1)**2 + (y-y1)**2)**0.5
-            E = x * voxelE + set0_E
-            N = y * voxelN + set0_N
-            #track.append((x, y, q, dist))
-            track.append((E, N, q, index))
-            index += 1
-            x += stepx
-            y += stepy
-    elif dx < 0 and dy > 0:
-        while x > x2 and y < y2:
-            q = demset.interpolate_DEMxy(x, y)
-            #dist = ((x-x1)**2 + (y-y1)**2)**0.5
-            E = x * voxelE + set0_E
-            N = y * voxelN + set0_N
-            #track.append((x, y, q, dist))
-            track.append((E, N, q, index))
-            index += 1
-            x += stepx
-            y += stepy
-    elif dx < 0 and dy < 0:
-        while x > x2 and y > y2:
-            q = demset.interpolate_DEMxy(x, y)
-            #dist = ((x-x1)**2 + (y-y1)**2)**0.5
-            E = x * voxelE + set0_E
-            N = y * voxelN + set0_N
-            #track.append((x, y, q, dist))
-            track.append((E, N, q, index))
-            index += 1
-            x += stepx
-            y += stepy
-    else:
-        assert False
-    x = x2
-    y = y2
-    q = demset.interpolate_DEMxy(x, y)
-    E = x * voxelE + set0_E
-    N = y * voxelN + set0_N
-    index = -2 # last point has index -2
-    #track.append((x, y, q, dist))
-    #track.append((E, N, q,"simple"))
-    track.append((E, N, q, index))
+            E,N = xy_to_EN((x,y))
+            point_index = -1
+        q = demset.interpolate_DEMxy(x, y)
+        track.append((E, N, q, point_index))
     return track
 
 
-def get_interpolation_vertex(x1, y1, dx, dy, q11, q21, q12, q22):
+def interpolate_line_bysamples(E0, N0, E1, N1, samples=11):
     """
-    Return vertex (i.e. min or max value) of linear
-    interpolation for line defined by ``x1, y1, dx, dy`` given
-    corner points ``q11, q21, q12, q22``, which represent values at
-    ``x, y`` coordinates ``0, 0``; ``1, 0``; ``0, 1`` and ``1, 0``.
-    (``x1, y1`` should thefore be defined  in terms of the same coordinate system)
+    Simple algorithm that returns a DEM profile along a line by simple 
+    interpolation. Algorithm will return a total of ``samples`` points 
+    with elevation along the line segment, inclusive of ``x0,y0`` and ``x1,y1``.
+    
+    Does not catch exceptions from failed DEM lookups, so these will be 
+    propagated to the caller.
 
-    Returns tuple ``x, y, maxmin, ismax`` where ``x, y`` is x, y coordinate
-    of the vertex, ``maxmin`` is the interpolated ``q`` value of the
-    vertex and ``ismax`` is ``True`` if vertex represents a maximum
-    (``False`` if minimum).
+    Arguments:
+        
+        E0, N0, E1, N1 : floats
+            NZTM2000 coordinates of line to interpolate
+        samples : integer
+            number of samples to interpolate along line
+    
+    Return:
+        out : list of (float,float,float,integer) tuples
+            List of points in interpolated path as ``(E,N,elevation,point_index)`` 
+            tuples. ``E,N`` are NZTM coordinates of interpolated point, 
+            ``elevation`` is elevation of interpolated point above sea-level in
+            metres and ``point_index`` is the index of that point in the original
+            path, with ``point_index=-1`` for interpolated points not in the
+            original path. (For this algorithm, only the first and last returned
+            points will have ``point_index`` values).
 
-    Only 'internal' vertices are returned, i.e. if vertex
-    is outside range ``0, 0`` to ``1, 1``, returns ``None``.
+    """
+    
+    samples = min(HardLimits.max_line_steps,samples)
+
+    # find starting and ending x/y coordinates
+    x0,y0 = EN_to_xy((E0,N0))
+    x1,y1 = EN_to_xy((E1,N1))
+
+    # determine deltas
+    dx = x1-x0
+    dy = y1-y0
+
+    # interpolate
+    x = x0
+    y = y0
+    track = []
+    for sample in range(samples):
+        if sample==0: # first sample = first coord
+            x,y = x0,y0
+            E,N = E0,N0
+            path_index = 0
+        elif sample==samples-1: # last sample = last coord
+            x,y = x1,y1
+            E,N = E1,N1
+            path_index = 1
+        else:
+            fraction = float(sample)/(samples-1)
+            x += x0 + fraction*dx
+            y += y0 + fraction*dy
+            E,N = xy_to_EN((x,y))
+            path_index = -1
+        q = demset.interpolate_DEMxy(x, y)
+        track.append((E, N, q, path_index))
+
+    return track
+
+def interpolate_line_bysteps(E0, N0, E1, N1, stepsize = 100.0):
+    """
+    Simple algorithm that returns a DEM profile along a line by simple 
+    interpolation. Starts at ``x0, y0``, and moves toward ``x1, y1`` in 
+    ``stepsize`` distances until reaching ``x1, y1``. Elevation at ``x0, y0``
+    and ``x1, y1`` are always returned as first and last points, respectively.
+
+    Does not catch exceptions from failed DEM lookups, so these will be 
+    propagated to the caller.
+
+    Arguments:
+        
+        E0, N0, E1, N1 : floats
+            NZTM2000 coordinates of line to interpolate
+        samples : float
+            size of each step to interpolate along line
+    
+    Return:
+        out : list of (float,float,float,integer) tuples
+            List of points in interpolated path as ``(E,N,elevation,point_index)`` 
+            tuples. ``E,N`` are NZTM coordinates of interpolated point, 
+            ``elevation`` is elevation of interpolated point above sea-level in
+            metres and ``point_index`` is the index of that point in the original
+            path, with ``point_index=-1`` for interpolated points not in the
+            original path. (For this algorithm, only the first and last returned
+            points will have ``point_index`` values).
+
+    """
+
+    # find starting and ending x/y coordinates
+    x0,y0 = EN_to_xy((E0,N0))
+    x1,y1 = EN_to_xy((E1,N1))
+
+    # determine deltas
+    dx = x1-x0
+    dy = y1-y0
+    dxy = ( dx**2 + dy**2 ) ** 0.5
+    
+    # ensure stepsize does cause # samples to exceed limit
+    stepsize = abs(stepsize) # negative stepsizes will cause infinite loop
+    stepsize = min(stepsize,dxy/HardLimits.max_line_steps)
+
+    # interpolate
+    x = x0
+    y = y0
+    track = []
+    sample_dxy = 0.0
+    while True:
+        if sample_dxy==0.0: # first sample = first coord
+            x,y = x0,y0
+            E,N = E0,N0
+            path_index = 0
+        else:
+            fraction = sample_dxy/dxy
+            if fraction>=1.0: # exceeded total distance, i.e last sample = last coord
+                x,y = x1,y1
+                E,N = E1,N1
+                path_index = 1
+            else:
+                x += x0 + fraction*dx
+                y += y0 + fraction*dy
+                E,N = xy_to_EN((x,y))
+                path_index = -1
+        q = demset.interpolate_DEMxy(x, y)
+        track.append((E, N, q, path_index))
+        sample_dxy += stepsize
+ 
+    return track
+
+def get_interpolation_vertex(x1, y1, dx, dy, q00, q10, q01, q11):
+    """
+    Return vertex (i.e. min or max value) of linear interpolation for line 
+    defined by ``x1, y1, dx, dy`` given corner points ``q00, q10, q01, q11``, 
+    which represent values at ``x, y`` coordinates ``0, 0``; ``1, 0``; ``0, 1`` 
+    and ``1, 0``. (``x1, y1`` should therefore be defined in terms of the same 
+    coordinate system).
+
+    Only 'internal' vertices are returned, otherwise ``None``.
+
+    Arguments:
+        
+        x1, y1, dx, dy : floats
+            parameters of a line
+        q00, q10, q01, q11 : floats
+            values defined at coordinates ``0, 0``; ``1, 0``; ``0, 1``  and 
+            ``1, 0``
+    
+    Return:
+    
+        out : (x, y, maxmin, ismax) tuple
+            Returns tuple ``x, y, maxmin, ismax`` where ``x, y`` is 
+            x, y coordinate of the vertex, ``maxmin`` is the interpolated ``q``
+            value of the vertex and ``ismax`` is ``True`` if vertex represents a 
+            maximum (``False`` if minimum). Return is ``None`` if no vertices
+            in the range [``0, 0`` to ``1, 1``] are present.
+
     """
     if abs(dx) >= abs(dy): # chose a formula depending on relative dx/dy, to avoid divide by 0
         # y = mx + y0
         m = dy / dx
         y0 = y1-m * x1
-        q_sum = q11 - q21 - q12 + q22
+        q_sum = q00 - q10 - q01 + q11
         a = q_sum * m
-        b = (-q11 + q12) * m + q_sum * y0 + (-q11 + q21)
-        c = q11 - q11 * y0 + q12 * y0
+        b = (-q00 + q01) * m + q_sum * y0 + (-q00 + q10)
+        c = q00 - q00 * y0 + q01 * y0
         if a == 0.0: return None # possible if q is flat
         x = -b / (2 * a)
         y = m * x + y0
@@ -241,10 +306,10 @@ def get_interpolation_vertex(x1, y1, dx, dy, q11, q21, q12, q22):
         # x = ny + x0
         n = dx / dy
         x0 = x1-n * y1
-        q_sum = q11 - q21 - q12 + q22
+        q_sum = q00 - q10 - q01 + q11
         a = q_sum * n
-        b = (-q11 + q21) * n + q_sum * x0 + (-q11 + q12)
-        c = q11 - q11 * x0 + q21 * x0
+        b = (-q00 + q10) * n + q_sum * x0 + (-q00 + q01)
+        c = q00 - q00 * x0 + q10 * x0
         if a == 0.0: return None
         y = -b / (2 * a)
         x = n * y + x0
@@ -252,78 +317,85 @@ def get_interpolation_vertex(x1, y1, dx, dy, q11, q21, q12, q22):
     if x < 0 or y < 0 or x > 1.0 or y > 1.0: return None # not within bounds
     return x, y, maxmin, a < 0
 
-def interpolate_line_ideal(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=True):
+def interpolate_line_smart(E0, N0, E1, N1, min_grade_delta=0.01, force_minmax=True):
     """
     Given a continuous line that passes through a discrete DEM image, will
-    interpolate height values from the DEM using linear interpolation.
-
-    If ``samples`` is not None, will interpolate with given number of samples
-    along line. Otherwise,advanced line interpolation algorithm than will
-    produce a simplified but maximal resolution line interpolated in height
-    (``q``) direction.
+    interpolate height values from the DEM using linear interpolation. This
+    function uses a smart algorithm to produce a simplified but high resolution 
+    line interpolated in height (``q``) direction.
 
     How it works:
-    1) Assume line is running through an x/y grid of DEM points.
-    2) At any point in line, immediately surrounding DEM points will contribute
-    to linear interpolate height at that point.
-    3) To obtain maximal resolution of
-    line, determine height as line enters each new x/y location in the grid.
-    4) It is also possible for a local maximum/minimum along the line to occur between a
-    certain series of surrounding points. Whether such a point exists and its location
-    can be calculated solving the quadratic equation defined by the linear
-    interpolation to find the presence of a vertex.
-    5) Each interpolated point (x, y, q) contributes to a new segment on the path.
-    6) If the grade of that segment is similar to the last segment (grade_delta),
-    combine the two segments to simplify the path. This produces a path with a
-    smaller number of segments but still maintaining most height information in the
-    line. Maximum/minimum points on the line (where grade sign changes) will always
-    be kept if ``force_minmax`` is True
+    
+        1) Assume line is running through an x/y grid of DEM points.
+        
+        2) At any point in line, immediately surrounding DEM points will 
+           contribute to (bi)linear interpolate height at that point.
+        
+        3) A 'maximal' resolution interpolation of the line will interpolate
+           for each point in the DEM grid, e.g. determine height as line enters 
+           each new x/y location in the grid.
+          
+        4) It is also possible for a local maximum/minimum along the line to 
+           occur between a certain series of surrounding points. Whether such a 
+           point exists and its location can be calculated solving the quadratic 
+           equation defined by the linear interpolation to find the presence of 
+           a vertex.
+           
+        5) Each interpolated point (x, y, q) contributes to a new segment on the
+           path.
+           
+        6) This will produce a large number of interpolated points for. To remove
+           redundant or practically-redundant points, filter these according to
+           changes in grade. If the grade of that segment is similar to the last 
+           segment (difference in grade < ``min_grade_delta``), then combine the 
+           two segments to simplify the path. This produces a path with a
+           smaller number of segments but still maintaining most height 
+           information in the line. Maximum/minimum points on the line (where 
+           grade sign changes) will always be kept if ``force_minmax`` is ``True``.
+           
+    Does not catch exceptions from failed DEM lookups, so these will be 
+    propagated to the caller. If length of line is more than hard limit, by steps
+    algorithm will be used instead.
 
-    E0, N0, E1, N1 : numbers
-      NZTM2000 coordinates of line to interpolate
-    min_grade_delta : number
-      min delta between two grade segments to keep segments separate, if delta
-      is less than this the segments will be merged to simplify the interpolated
-      line
-    force_minmax : boolean
-      whether to force min/max points on line to be kept regardless of grade_delta
+    Arguments:
 
-    returns a list of (E, N, q, index) tuples, where
+        E0, N0, E1, N1 : floats
+          NZTM2000 coordinates of line to interpolate
+        min_grade_delta : float
+          min delta between two grade segments to keep segments separate, if delta
+          is less than this the segments will be merged to simplify the interpolated
+          line
+        force_minmax : boolean
+          whether to force min/max points on line to be kept regardless of grade_delta
 
-    E, N : easting and northig of interpolated point
-    dist : distance of this point from start in grid units
-    q : height of point
-    grade : grade of from last point to this point (d_q/d_dist), None in first segment
-    d_dist : delta of dist from last point, None in first segment
-    d_q : delta of q from last point, None in first segment
-    index : increasing index number of the point(up to last point), may not be sequential
-    but first point   will always be ``0`` and last point will be <0 (-1 if this algorithm
-    used, -2 if simple algorithm used because line was too long)
-
-
-    Does not catch IndexErrors from failed DEM lookups, so these
-    will be propagated to the caller.
-
-    If line length is more than 300 voxels in one direction,
-    simple algorithm will be used instead.
+   Return:
+   
+        out : list of (float,float,float,integer) tuples
+            List of points in interpolated path as ``(E,N,elevation,point_index)`` 
+            tuples. ``E,N`` are NZTM coordinates of interpolated point, 
+            ``elevation`` is elevation of interpolated point above sea-level in
+            metres and ``point_index`` is the index of that point in the original
+            path, with ``point_index=-1`` for interpolated points not in the
+            original path. (For this algorithm, only the first and last returned
+            points will have ``point_index`` values).
+ 
     """
 
     # find starting and ending x/y coordinates
-    x0 = (E0-set0_E) / voxelE
-    y0 = (N0-set0_N) / voxelN
-    x1 = (E1-set0_E) / voxelE
-    y1 = (N1-set0_N) / voxelN
+    x0,y0 = EN_to_xy((E0,N0))
+    x1,y1 = EN_to_xy((E1,N1))
 
     # find deltas
     dx = x1-x0
     dy = y1-y0
+    dxy = ( dx**2 + dy**2 ) ** 0.5
     abs_dx = abs(dx)
     abs_dy = abs(dy)
 
-    if abs_dx > 300 or abs_dy > 300:
+    if dxy > HardLimits.max_linedist_smart:
         # line length for this algorithm exceeded
         # use simple algorithm
-        return interpolate_line_simple(E0, N0, E1, N1)
+        return interpolate_line_bysteps(E0, N0, E1, N1)
 
     #start at point 0
     x = x0
