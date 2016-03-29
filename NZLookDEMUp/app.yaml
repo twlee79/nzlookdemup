@@ -1,5 +1,5 @@
 application: nz-twlee-demlookup
-version: 0-9beta1
+version: 0-9beta-2
 runtime: python27
 api_version: 1
 threadsafe: true

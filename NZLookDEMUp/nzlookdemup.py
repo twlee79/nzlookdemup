@@ -2,7 +2,7 @@
 
 """
 nzlookdemup app
-version 0.9
+version 0.9-2
 Copyright (c) 2014-2016 Tet Woo Lee
 """
 
@@ -30,6 +30,7 @@ import traceback
 import json
 import traceback
 import re
+from urlparse import urlparse
 
 is_debug = True
 
@@ -88,6 +89,9 @@ class ElevationRequestHandler(webapp2.RequestHandler):
         # Set self.request, self.response and self.app.
         self.initialize(request, response)
 
+        self.allowed_origin_hostnames = {'null' : True, 'localhost' : True}
+            #: list of hostnames allowed to access this handler
+        
         self.set_status_ok()
         self.response_type = None
         self.latlngs = []
@@ -96,7 +100,7 @@ class ElevationRequestHandler(webapp2.RequestHandler):
         self.stepsize = None
         self.results = []
     def handle_exception(self, exception, debug):
-        logging.debug(exception)
+        logging.warning(exception)
         if isinstance(exception, webapp2.HTTPException):
             # If the exception is a HTTPException, let base class handle it
             webapp2.RequestHandler.handle_exception(self, exception, debug)
@@ -117,7 +121,12 @@ class ElevationRequestHandler(webapp2.RequestHandler):
         self.error_message = error_message
         self.error_traceback = traceback
     def set_default_headers(self):
-        self.response.headers['Access-Control-Allow-Origin'] = 'null'
+        request_origin = self.request.headers['origin']
+        request_hostname = urlparse(request_origin).hostname
+        if request_hostname is None: request_hostname = 'null'
+            # may get origin 'null' if opening file locally, this has no hostname
+        if request_hostname in self.allowed_origin_hostnames:
+            self.response.headers['Access-Control-Allow-Origin'] = request_origin
         self.response.headers['Access-Control-Allow-Headers'] = "Content-Type"
     def get(self):
         self.set_default_headers()
@@ -297,7 +306,6 @@ class ElevationRequestHandler(webapp2.RequestHandler):
                             if self.stepsize is None:
                                 track = deminterpolater.interpolate_line_smart(point1[0], point1[1], point2[0], point2[1])
                             else:
-                                logging.debug(self.stepsize)
                                 track = deminterpolater.interpolate_line_bysteps(point1[0], point1[1], point2[0], point2[1], stepsize=self.stepsize)
                             for j,point in enumerate(track):
                                 E, N, elevation = point
@@ -315,7 +323,7 @@ class ElevationRequestHandler(webapp2.RequestHandler):
                     lat,lng = latlng
                     point1 = NZTM2000.latlng_to_NZTM(lat,lng)
                     elevation = deminterpolater.demset.interpolate_DEM(*point1)
-                    self.results.append((elevation,lat,lng,i))
+                    self.results.append((lat,lng,elevation,i))
             self.set_status_ok()
         except (ValueError,IndexError) as e:
             # can get here if NZTM2000 out of range, or no DEM for coordinates
@@ -370,7 +378,7 @@ class ElevationRequestHandler(webapp2.RequestHandler):
         
         self.response.headers['Content-Type'] = 'application/json'   
         self.response.out.write(json.dumps(response_dict, indent=4, sort_keys=True))                
-        logging.debug(self.response)
+        #logging.debug(self.response)
         return self.response
     
     def process_response_csv(self):

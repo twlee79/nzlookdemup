@@ -100,6 +100,7 @@ nztwlee.demlookup.ElevationService.prototype.sendElevationRequest = function(isp
                                 var index = respView.getInt32(i+12);
                                 var latLng = new google.maps.LatLng(lat,lng);
                                 var result = {location:latLng, elevation:q};
+                                if (index>=0) result.pathIndex = index; // otherwise undefined
                                 parsedData.push(result);
                                 //latLng.height = q;
                                 //latLng.index = index;
@@ -146,11 +147,23 @@ nztwlee.demlookup.ElevationService.prototype.sendElevationRequest = function(isp
         pointArray = request.locations;
     }
     
+    if (pointArray.length<1) {
+            callbackError(nztwlee.demlookup.ElevationStatus.INVALID_REQUEST,
+                          'Request object contains no coordinates');
+    }
+    
+    var isLatLngLiteral;
+    if (typeof(pointArray[0].lat) === 'function') {
+        // points are google.maps.LatLng objects
+        isLatLngLiteral = false;
+    } else {
+        isLatLngLiteral = true;
+    }
+    
     // for storing results
     var elevationResult = [];
     var elevationStatus = nztwlee.demlookup.ElevationStatus.OK;
     this.lastErrorMessage = null;
-    
     // process input data
     var numPoints = pointArray.length;
     var reqBuffer = new ArrayBuffer(numPoints * 8);
@@ -158,8 +171,18 @@ nztwlee.demlookup.ElevationService.prototype.sendElevationRequest = function(isp
     for (var i=0; i<numPoints; i++) {
         // pack as 32-bit ints, after multiplying by 1e7
         var latLng = pointArray[i];
-        reqView.setInt32(i*8, latLng.lat * 1.0e7);
-        reqView.setInt32(i*8 + 4, latLng.lng * 1.0e7);
+        var lat;
+        var lng;
+        if (isLatLngLiteral) {
+            lat = latLng.lat;
+            lng = latLng.lng;
+        } else {
+            // need to call functions for google.maps.LatLng
+            lat = latLng.lat();
+            lng = latLng.lng();
+        }
+        reqView.setInt32(i*8, lat * 1.0e7);
+        reqView.setInt32(i*8 + 4, lng * 1.0e7);
     }
     
     // send request
