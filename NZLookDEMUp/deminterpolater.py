@@ -20,7 +20,6 @@ Copyright (c) 2014-2016 Tet Woo Lee
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from demset import DEMSet
-from nztm2000 import NZTM2000
 import math
 
 set0_E = 1012007.5 # central coordinate of top-left pixel in DEM set

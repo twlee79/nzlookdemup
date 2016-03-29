@@ -1,20 +1,37 @@
+# coding: utf-8
+
+"""
+nzlookdemup app
+version 0.9
+Copyright (c) 2014-2016 Tet Woo Lee
+"""
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import os
 import csv
-import itertools
 import logging
 import webapp2
 from nztm2000 import NZTM2000
 import deminterpolater
 import struct
 import traceback
-import cloudstorage
-import os
-from google.appengine.api import app_identity
-import sys
 import json
 import traceback
 import re
 
-#is_devserver = os.environ.get('SERVER_SOFTWARE', '').startswith('Dev')
+is_debug = True
 
 class BaseHandler(webapp2.RequestHandler):
     pass
@@ -224,6 +241,8 @@ class ElevationRequestHandler(webapp2.RequestHandler):
             self.response_type = ResponseType.BINARY;
         elif self.request.path=="/elevation/json":
             self.response_type = ResponseType.JSON;
+        elif self.request.path=="/elevation/csv":
+            self.response_type = ResponseType.CSV;
         elif self.request.path=="/elevation/xml":
             # xml requests, not implemented
             self.abort(501)
@@ -370,7 +389,7 @@ class ElevationRequestHandler(webapp2.RequestHandler):
             for result in self.results:
                 lat,lng,elevation,path_index = result
                 if path_index is None: path_index = ""
-                self.response.write("{},{},{}{}\n".format(lat,lng,elevation, 
+                self.response.write("{:.7f},{:.7f},{:.2f}{}\n".format(lat,lng,elevation, 
                     ',{}'.format(path_index) if self.is_path else ''))
         #logging.debug(self.response)
         return self.response
@@ -389,8 +408,9 @@ class ElevationRequestHandler(webapp2.RequestHandler):
 
 application = webapp2.WSGIApplication([
     ('/elevation',ElevationRequestHandler),
+    ('/elevation/binary',ElevationRequestHandler),
+    ('/elevation/csv',ElevationRequestHandler),
     ('/elevation/json',ElevationRequestHandler),
-    ('/elevation/xml',ElevationRequestHandler),
-    ('/elevation/binary',ElevationRequestHandler)
-    
-], debug=True)
+    ('/elevation/xml',ElevationRequestHandler)
+   
+], debug=is_debug)

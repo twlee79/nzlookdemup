@@ -2,7 +2,7 @@
 
 """
 DEMSet module
-version 9
+version 10
 Copyright (c) 2014-2016 Tet Woo Lee
 """
 
@@ -25,9 +25,10 @@ from itertools import izip
 from google.appengine.api import app_identity
 import os
 import struct
+import threading
 
 bucket_name = '/' + os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
-is_local = os.environ["APPLICATION_ID"].startswith("dev~")
+is_devserver = os.environ.get('SERVER_SOFTWARE', '').startswith('Dev')
 
 class DEMReader:
     buffer_size = 4 * 1024 * 1024 # need manual buffer for cloud storage, this does not support buffered random i/o (sequential only)
@@ -44,6 +45,7 @@ class DEMReader:
         self.cloud = cloud
         self.dem_file = None
         self.deactivate()
+        self.lock = threading.Lock() # lock for acquiring this object when in use
     def is_active(self):
         return self.dem_file is not None
     def activate(self):
@@ -164,7 +166,7 @@ class DEMSet:
               field_value = int(field_value)
             value_dict[field_name] = field_value
 
-          DEM_reader = DEMReader(value_dict, cloud = False if is_local else True)
+          DEM_reader = DEMReader(value_dict, cloud = False if is_devserver else True)
           image_grid_x0 = DEM_reader.image_x0/self.DEM_reader_grid_resolution
           image_grid_y0 = DEM_reader.image_y0/self.DEM_reader_grid_resolution
           image_grid_xn = DEM_reader.image_xn/self.DEM_reader_grid_resolution
@@ -205,14 +207,20 @@ class DEMSet:
             DEM_reader = self.DEM_grid[image_grid_y][image_grid_x]
             if DEM_reader is not None:
                 assert(DEM_reader.within_bounds(x, y))
-                if not DEM_reader.is_active():
-                    DEM_reader.activate()
-                    self.active_reader_deque.appendleft(DEM_reader) # store as an active reader
-                ret = DEM_reader.get_value(x, y)
-                assert ret != None
+                with DEM_reader.lock:
+                    # lock the reader so it can't be deactivated by other threads
+                    # until we are done with it
+                    if not DEM_reader.is_active():
+                        DEM_reader.activate()
+                        self.active_reader_deque.appendleft(DEM_reader) # store as an active reader
+                    ret = DEM_reader.get_value(x, y)
+                    assert ret != None
                 if len(self.active_reader_deque) > self.max_active_readers:
                     oldest_reader = self.active_reader_deque.pop() # remove oldest if too many active readers
-                    oldest_reader.deactivate()
+                    with oldest_reader.lock:
+                        # lock to make sure we deactivate completely before other
+                        # threads try to use this again
+                        oldest_reader.deactivate()
                 return ret
         except IndexError:
             pass

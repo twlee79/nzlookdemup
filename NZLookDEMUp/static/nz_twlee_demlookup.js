@@ -124,7 +124,8 @@ nztwlee.demlookup.ElevationService.prototype.sendElevationRequest = function(isp
     };
 
     // set up request
-    var url = "http://localhost:9080/elevation/binary";
+    //var url = "http://localhost:9080/elevation/binary";
+    var url = "https://nz-twlee-demlookup.appspot.com/elevation/binary";
 
     var pointArray;
     if (ispath) {
