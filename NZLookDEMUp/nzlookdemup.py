@@ -89,7 +89,7 @@ class ElevationRequestHandler(webapp2.RequestHandler):
         # Set self.request, self.response and self.app.
         self.initialize(request, response)
 
-        self.allowed_origin_hostnames = {'null' : True, 'localhost' : True}
+        self.allowed_origin_hostnames = {'localhost' : True, 'twlee.nz' : True}
             #: list of hostnames allowed to access this handler
         
         self.set_status_ok()
